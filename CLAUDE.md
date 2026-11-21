@@ -35,6 +35,10 @@ DB file: `data/app.db` (gitignored; override with `DATABASE_PATH`). Backup = cop
    must never be sold — re-validate inside the billing transaction, not just in the UI.
 6. Invoice items snapshot name, price, GST rate and purchase price; later edits to products must not change old invoices.
 
+## Demo deployment
+`netlify.toml` sets `NETLIFY_DEMO=1`: `getDb()` then auto-migrates and seeds a `/tmp` DB (`src/db/bootstrap.ts`).
+It is ephemeral and for demos only — never real data. Normal runs (env unset) are unaffected.
+
 ## Conventions
 - Strict TypeScript, no `any`. Validate all inputs at boundaries with `zod`.
 - Pure business logic lives in `src/lib` (no DB/IO) and is unit-tested; DB logic in `src/services`.

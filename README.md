@@ -15,6 +15,15 @@ USB barcode scanners work on any screen with no setup.
 
 Production: `npm run build && npm start` (or `start:https`). Backup = copy `data/app.db`.
 
+## Deploy a demo on Netlify (try it on your phone)
+Netlify has no persistent disk, so this is a **demo only**: SQLite lives in `/tmp`, is created and filled with sample
+data on first request, and resets when the function recycles. Never enter real shop data there.
+1. Netlify → *Add new site* → *Import from GitHub* → select this repo (and branch).
+2. Deploy — all settings come from `netlify.toml` (`NETLIFY_DEMO=1`, `DATABASE_PATH=/tmp/app.db`).
+3. Open the `https://….netlify.app` URL on your phone. HTTPS means the camera scanner works. Use *Add to Home Screen* to install the PWA.
+
+For real use, self-host on a PC / Raspberry Pi (see Quick start).
+
 ## Features
 - Products with batches, MFG/expiry, MRP/selling/purchase price, GST slabs (0/5/12/18), loose (decimal) quantities
 - Low-stock and near-expiry (30/60 day) alerts; expired stock write-off

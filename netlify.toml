@@ -1,0 +1,13 @@
+# Demo deployment only: SQLite lives in /tmp (ephemeral) and is created + seeded on first request.
+# Real shop use: self-host on a PC / Raspberry Pi with `npm run build && npm start`.
+[build]
+  command = "npm run build"
+
+[build.environment]
+  NODE_VERSION = "22"
+  NETLIFY_DEMO = "1"
+  DATABASE_PATH = "/tmp/app.db"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+[functions]
+  external_node_modules = ["better-sqlite3"]

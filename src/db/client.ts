@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 import fs from "node:fs";
 import path from "node:path";
+import { ensureDemoDb } from "./bootstrap";
 import * as schema from "./schema";
 
 export type Db = BetterSQLite3Database<typeof schema>;
@@ -20,7 +21,9 @@ export function getDb(): Db {
   if (!globalForDb.__db) {
     const file = process.env.DATABASE_PATH ?? path.join(process.cwd(), "data", "app.db");
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    globalForDb.__db = createDb(new Database(file));
+    const db = createDb(new Database(file));
+    ensureDemoDb(db); // no-op unless NETLIFY_DEMO=1
+    globalForDb.__db = db;
   }
   return globalForDb.__db;
 }
