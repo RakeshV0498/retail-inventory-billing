@@ -330,7 +330,7 @@ export function PosClient() {
           <div className="grid grid-cols-4 gap-1" role="radiogroup" aria-label="Payment mode">
             {(["cash", "upi", "card", "split"] as const).map((m) => (
               <button key={m} type="button" role="radio" aria-checked={payMode === m} onClick={() => setPayMode(m)}
-                className={`btn px-1 text-sm capitalize ${payMode === m ? "bg-emerald-700 text-white" : "border border-slate-300 bg-white"}`}>{m}</button>
+                className={`btn px-1 text-sm ${m === "upi" ? "uppercase" : "capitalize"} ${payMode === m ? "bg-emerald-700 text-white" : "border border-slate-300 bg-white"}`}>{m}</button>
             ))}
           </div>
           {payMode === "split" && (
