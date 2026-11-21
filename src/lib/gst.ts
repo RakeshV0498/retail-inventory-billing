@@ -84,3 +84,14 @@ export function splitGst(taxAmount: number): { cgst: number; sgst: number } {
   const sgst = Math.floor(taxAmount / 2);
   return { cgst: taxAmount - sgst, sgst };
 }
+
+/** Spread a flat discount across batch allocations proportionally to quantity; remainder to the last. */
+export function splitFlatDiscount(total: number, quantities: number[]): number[] {
+  const sum = quantities.reduce((a, b) => a + b, 0);
+  let given = 0;
+  return quantities.map((q, i) => {
+    const part = i === quantities.length - 1 ? total - given : Math.floor((total * q) / sum);
+    given += part;
+    return part;
+  });
+}

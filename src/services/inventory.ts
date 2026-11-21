@@ -9,6 +9,7 @@ import {
   stockMovements,
   UNIT_TYPES,
   type Batch,
+  type PricingRule,
   type Product,
 } from "@/db/schema";
 import { addDaysISO, daysBetween, isExpired, todayISO } from "@/lib/dates";
@@ -186,6 +187,10 @@ export interface ProductStock extends Product {
   expiredQty: number;
   /** Earliest-expiry sellable batch, i.e. what FEFO would sell next */
   nextBatch: Batch | null;
+  /** Sellable batches in FEFO order (lets the POS preview allocation with the same pure functions). */
+  sellableBatches: (Batch & { markdownPercent: number })[];
+  /** Near-expiry markdown suggested for `nextBatch`, hundredths of a percent (0 = none). */
+  suggestedDiscount: number;
 }
 
 export function withStock(db: Q, rows: Product[], today: string): ProductStock[] {
@@ -197,12 +202,25 @@ export function withStock(db: Q, rows: Product[], today: string): ProductStock[]
     list.push(b);
     byProduct.set(b.productId, list);
   }
+  const rules = db.select().from(pricingRules).where(eq(pricingRules.isActive, true)).all();
   return rows.map((p) => {
     const bs = byProduct.get(p.id) ?? [];
     const sellable = sortFefo(bs.filter((b) => !isExpired(b.expiryDate, today)));
     const sellableQty = sellable.reduce((s, b) => s + b.quantityAvailable, 0);
     const totalQty = bs.reduce((s, b) => s + b.quantityAvailable, 0);
-    return { ...p, sellableQty, totalQty, expiredQty: totalQty - sellableQty, nextBatch: sellable[0] ?? null };
+    const next = sellable[0] ?? null;
+    return {
+      ...p,
+      sellableQty,
+      totalQty,
+      expiredQty: totalQty - sellableQty,
+      nextBatch: next,
+      sellableBatches: sellable.map((b) => ({
+        ...b,
+        markdownPercent: markdownFromRules(rules, p.category, b.expiryDate, today),
+      })),
+      suggestedDiscount: next ? markdownFromRules(rules, p.category, next.expiryDate, today) : 0,
+    };
   });
 }
 
@@ -298,10 +316,19 @@ export function getExpiredBatches(db: Q, today: string): ExpiryAlert[] {
 
 /** Suggested discount (hundredths of a percent) for a batch based on active pricing rules. 0 if none. */
 export function suggestedMarkdown(db: Q, category: Product["category"], expiryDate: string | null, today: string): number {
+  const rules = db.select().from(pricingRules).where(eq(pricingRules.isActive, true)).all();
+  return markdownFromRules(rules, category, expiryDate, today);
+}
+
+export function markdownFromRules(
+  rules: PricingRule[],
+  category: Product["category"],
+  expiryDate: string | null,
+  today: string,
+): number {
   if (!expiryDate) return 0;
   const days = daysBetween(today, expiryDate);
   if (days < 0) return 0;
-  const rules = db.select().from(pricingRules).where(eq(pricingRules.isActive, true)).all();
   let best = 0;
   for (const r of rules) {
     if (r.category && r.category !== category) continue;

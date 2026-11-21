@@ -6,6 +6,7 @@ import {
   invoiceItems,
   invoices,
   PAYMENT_MODES,
+  pricingRules,
   products,
   stockMovements,
   type Invoice,
@@ -13,8 +14,16 @@ import {
 } from "@/db/schema";
 import { todayISO } from "@/lib/dates";
 import { allocateFefo, StockError } from "@/lib/fefo";
-import { calcInvoiceTotals, calcLine, type GstRate, type LineResult } from "@/lib/gst";
+import {
+  calcInvoiceTotals,
+  calcLine,
+  splitFlatDiscount,
+  type DiscountType,
+  type GstRate,
+  type LineResult,
+} from "@/lib/gst";
 import { assertValidQty, QtyError } from "@/lib/qty";
+import { markdownFromRules } from "./inventory";
 import { ServiceError } from "./types";
 
 export const cartLineInput = z.object({
@@ -24,6 +33,8 @@ export const cartLineInput = z.object({
   discountType: z.enum(["none", "percent", "flat"]).default("none"),
   /** percent: hundredths of a percent; flat: paise (applied to the whole cart line) */
   discountValue: z.number().int().min(0).default(0),
+  /** Apply near-expiry markdown rules per batch (ignored when a manual discount is set). */
+  applyMarkdown: z.boolean().default(false),
 });
 
 export const invoiceInput = z.object({
@@ -47,17 +58,6 @@ export interface InvoiceWithItems {
   items: InvoiceItem[];
 }
 
-/** Spread a flat discount across batch allocations proportionally to quantity; remainder to the last. */
-export function splitFlatDiscount(total: number, quantities: number[]): number[] {
-  const sum = quantities.reduce((a, b) => a + b, 0);
-  let given = 0;
-  return quantities.map((q, i) => {
-    const part = i === quantities.length - 1 ? total - given : Math.floor((total * q) / sum);
-    given += part;
-    return part;
-  });
-}
-
 /**
  * Create an invoice atomically: FEFO-allocate every cart line, decrement batches, write items and
  * `sale_out` ledger rows. Expired and insufficient stock abort the whole sale (nothing is written).
@@ -71,6 +71,7 @@ export function createInvoice(db: Db, raw: InvoiceInput, now: Date = new Date())
     type Pending = Omit<typeof invoiceItems.$inferInsert, "invoiceId">;
     const pending: Pending[] = [];
     const lineResults: LineResult[] = [];
+    const rules = tx.select().from(pricingRules).where(eq(pricingRules.isActive, true)).all();
 
     for (const line of input.items) {
       const product = tx.select().from(products).where(eq(products.id, line.productId)).get();
@@ -104,13 +105,23 @@ export function createInvoice(db: Db, raw: InvoiceInput, now: Date = new Date())
       allocations.forEach((alloc, i) => {
         const batch = productBatches.find((b) => b.id === alloc.batchId)!;
         let calc: LineResult;
+        // Per-batch discount: manual discount wins; otherwise optional near-expiry markdown for THIS batch.
+        let dType: DiscountType = line.discountType;
+        let dValue = line.discountType === "flat" ? (flatShares[i] ?? 0) : line.discountValue;
+        if (line.applyMarkdown && line.discountType === "none") {
+          const pct = markdownFromRules(rules, product.category, batch.expiryDate, today);
+          if (pct > 0) {
+            dType = "percent";
+            dValue = pct;
+          }
+        }
         try {
           calc = calcLine({
             unitPrice: batch.sellingPrice,
             quantity: alloc.quantity,
             gstRate: product.gstRate as GstRate,
-            discountType: line.discountType,
-            discountValue: line.discountType === "flat" ? (flatShares[i] ?? 0) : line.discountValue,
+            discountType: dType,
+            discountValue: dValue,
           });
         } catch (e) {
           throw new ServiceError("INVALID_DISCOUNT", `${product.name}: ${e instanceof Error ? e.message : "bad discount"}`);
@@ -125,8 +136,8 @@ export function createInvoice(db: Db, raw: InvoiceInput, now: Date = new Date())
           quantity: alloc.quantity,
           unitPrice: batch.sellingPrice,
           purchasePrice: batch.purchasePrice,
-          discountType: line.discountType,
-          discountValue: line.discountType === "flat" ? (flatShares[i] ?? 0) : line.discountValue,
+          discountType: dType,
+          discountValue: dValue,
           discountAmount: calc.discountAmount,
           gstRate: product.gstRate,
           taxableAmount: calc.taxableAmount,
