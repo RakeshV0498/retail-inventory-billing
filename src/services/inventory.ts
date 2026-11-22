@@ -23,32 +23,36 @@ import { ServiceError, type Q } from "./types";
 
 const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
 
+/** Upper bounds on every numeric/text input: stops absurd values and oversized payloads at the boundary. */
+const MAX_PRICE = 1_000_000_000; // ₹1 crore, in paise
+const MAX_QTY = 1_000_000_000; // 1 million units, in milli-units
+
 export const productInput = z.object({
-  name: z.string().trim().min(1),
-  sku: z.string().trim().min(1),
-  barcode: z.string().trim().min(1).nullish(),
+  name: z.string().trim().min(1).max(200),
+  sku: z.string().trim().min(1).max(60),
+  barcode: z.string().trim().min(1).max(40).nullish(),
   category: z.enum(CATEGORIES),
   unitType: z.enum(UNIT_TYPES),
   allowDecimalQty: z.boolean().default(false),
   /** milli-units */
-  lowStockThreshold: z.number().int().min(0).default(0),
+  lowStockThreshold: z.number().int().min(0).max(MAX_QTY).default(0),
   gstRate: z.union([z.literal(0), z.literal(5), z.literal(12), z.literal(18)]),
-  hsnCode: z.string().trim().min(1).nullish(),
+  hsnCode: z.string().trim().min(1).max(20).nullish(),
 });
 export type ProductInput = z.input<typeof productInput>;
 
 export const batchInput = z
   .object({
     productId: z.number().int().positive(),
-    batchNumber: z.string().trim().min(1),
+    batchNumber: z.string().trim().min(1).max(60),
     mfgDate: isoDate.nullish(),
     expiryDate: isoDate.nullish(),
     /** paise */
-    purchasePrice: z.number().int().min(0),
-    mrp: z.number().int().min(0),
-    sellingPrice: z.number().int().min(0),
+    purchasePrice: z.number().int().min(0).max(MAX_PRICE),
+    mrp: z.number().int().min(0).max(MAX_PRICE),
+    sellingPrice: z.number().int().min(0).max(MAX_PRICE),
     /** milli-units */
-    quantity: z.number().int().positive(),
+    quantity: z.number().int().positive().max(MAX_QTY),
   })
   .refine((b) => b.sellingPrice <= b.mrp, { message: "Selling price cannot exceed MRP", path: ["sellingPrice"] })
   .refine((b) => !b.mfgDate || !b.expiryDate || b.mfgDate <= b.expiryDate, {
@@ -130,9 +134,9 @@ export const batchEditInput = z
     mfgDate: isoDate.nullish(),
     expiryDate: isoDate.nullish(),
     /** paise */
-    purchasePrice: z.number().int().min(0),
-    mrp: z.number().int().min(0),
-    sellingPrice: z.number().int().min(0),
+    purchasePrice: z.number().int().min(0).max(MAX_PRICE),
+    mrp: z.number().int().min(0).max(MAX_PRICE),
+    sellingPrice: z.number().int().min(0).max(MAX_PRICE),
   })
   .refine((b) => b.sellingPrice <= b.mrp, { message: "Selling price cannot exceed MRP", path: ["sellingPrice"] })
   .refine((b) => !b.mfgDate || !b.expiryDate || b.mfgDate <= b.expiryDate, {
@@ -173,6 +177,7 @@ export function updateBatch(db: Db, batchId: number, raw: BatchEditInput): Batch
  * `adjustment` movement in the same transaction so quantity always equals the ledger sum. Returns the delta (milli).
  */
 export function adjustStock(db: Db, batchId: number, newQuantity: number, reason: string, now: Date = new Date()): number {
+  if (newQuantity > MAX_QTY) throw new ServiceError("INVALID_QTY", "Quantity is too large");
   const why = reason.trim();
   if (!why) throw new ServiceError("REASON_REQUIRED", "Please give a reason for the correction");
   if (why.length > 200) throw new ServiceError("INVALID", "Reason is too long (200 characters max)");

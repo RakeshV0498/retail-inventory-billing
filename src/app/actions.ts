@@ -41,12 +41,12 @@ const optStr = (f: FormData, k: string) => str(f, k) || null;
 
 export async function searchProductsAction(q: string): Promise<ProductStock[]> {
   await requireAuth();
-  return searchProducts(getDb(), q, todayISO());
+  return searchProducts(getDb(), String(q).slice(0, 100), todayISO());
 }
 
 export async function barcodeLookupAction(code: string): Promise<ProductStock | null> {
   await requireAuth();
-  return findByBarcode(getDb(), code, todayISO());
+  return findByBarcode(getDb(), String(code).slice(0, 40), todayISO());
 }
 
 export type CheckoutResult = { ok: true; invoiceId: number } | { ok: false; error: string };
@@ -258,10 +258,10 @@ export async function saveSettingsAction(form: FormData) {
   await requireAuth();
   const fmt = str(form, "printFormat");
   saveSettings(getDb(), {
-    storeName: str(form, "storeName") || "My Store",
-    storeAddress: str(form, "storeAddress"),
-    gstin: str(form, "gstin"),
-    receiptFooter: str(form, "receiptFooter"),
+    storeName: str(form, "storeName").slice(0, 100) || "My Store",
+    storeAddress: str(form, "storeAddress").slice(0, 200),
+    gstin: str(form, "gstin").slice(0, 20),
+    receiptFooter: str(form, "receiptFooter").slice(0, 200),
     expiryWarnDays: Math.max(1, Number(str(form, "expiryWarnDays")) || 30),
     expiryWatchDays: Math.max(1, Number(str(form, "expiryWatchDays")) || 60),
     printFormat: fmt === "58" || fmt === "a4" ? fmt : "80",

@@ -42,6 +42,10 @@ Add-product looks the barcode up on Open Food Facts, Open Beauty Facts and Open 
 Only the barcode number is sent. The device needs internet access; without it you simply type the details.
 Coverage is good for packaged groceries, poor for medicines. Your own database remembers every barcode you save.
 
+## Security
+Optional PIN login, security headers on every response, capped inputs, and `npm run audit:prod` (currently 0 findings).
+Keep the app on your LAN/Tailscale; it is not meant to be exposed to the public internet.
+
 ## Develop
 `npm test` · `npm run typecheck` · `npm run lint`. See `CLAUDE.md` for conventions
 (money = integer paise, quantity = integer milli-units, all stock changes via `src/services` in a transaction).

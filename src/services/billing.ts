@@ -29,25 +29,25 @@ import { ServiceError } from "./types";
 export const cartLineInput = z.object({
   productId: z.number().int().positive(),
   /** milli-units */
-  quantity: z.number().int().positive(),
+  quantity: z.number().int().positive().max(1_000_000_000),
   discountType: z.enum(["none", "percent", "flat"]).default("none"),
   /** percent: hundredths of a percent; flat: paise (applied to the whole cart line) */
-  discountValue: z.number().int().min(0).default(0),
+  discountValue: z.number().int().min(0).max(1_000_000_000).default(0),
   /** Apply near-expiry markdown rules per batch (ignored when a manual discount is set). */
   applyMarkdown: z.boolean().default(false),
 });
 
 export const invoiceInput = z.object({
-  items: z.array(cartLineInput).min(1, "Cart is empty"),
-  customerName: z.string().trim().min(1).nullish(),
-  customerPhone: z.string().trim().min(1).nullish(),
+  items: z.array(cartLineInput).min(1, "Cart is empty").max(200, "Too many lines on one bill (200 max)"),
+  customerName: z.string().trim().min(1).max(100).nullish(),
+  customerPhone: z.string().trim().min(1).max(30).nullish(),
   paymentMode: z.enum(PAYMENT_MODES),
   /** Only used for split payments (paise); must sum to the grand total. */
   split: z
     .object({
-      cash: z.number().int().min(0).default(0),
-      upi: z.number().int().min(0).default(0),
-      card: z.number().int().min(0).default(0),
+      cash: z.number().int().min(0).max(10_000_000_000).default(0),
+      upi: z.number().int().min(0).max(10_000_000_000).default(0),
+      card: z.number().int().min(0).max(10_000_000_000).default(0),
     })
     .nullish(),
 });

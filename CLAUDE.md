@@ -43,6 +43,14 @@ Off by default; set in Settings (4-12 digits, scrypt-hashed in the `settings` ta
 - 5 wrong PINs lock logins for 60 s (global, in-memory). Changing/removing the PIN rotates the session secret (signs everyone out).
 - Disabled in demo mode. Never log or return `pinHash` / `sessionSecret`.
 
+## Security & dependencies
+- `npm run audit:prod` (= `npm audit --omit=dev --audit-level=high`) must stay clean; plain `npm audit` is currently 0 too. Re-check after any dependency change.
+- `package.json` `overrides` are deliberate, don't remove them without re-running the audit: `next -> postcss` (`$postcss`, replaces next's pinned 8.4.31) and
+  `@esbuild-kit/core-utils -> esbuild ^0.25.12` (drizzle-kit's bundled old esbuild). Versions in use: drizzle-orm 0.45.x, zod 4.x, vitest 5.x, Next 15.5.x. Next 16 is a deliberate, separate future migration.
+- Every zod boundary has caps (names/SKU/barcode lengths, prices <= ₹1 crore, quantities <= 1M units, <= 200 cart lines). New inputs need caps too.
+- All responses carry security headers (`SECURITY_HEADERS` in `next.config.ts`; no strict script CSP on purpose).
+- `tests/security.test.ts` fails if a page, route handler or server action lacks `requireAuth()`, if `"use server"` appears outside `actions.ts`, or if a client component imports the DB layer.
+
 ## Barcode capture & online lookup
 Add-product form (`ProductForm`): scan (camera), type, or USB scanner + Enter; then `lookupBarcode` (`src/services/productLookup.ts`).
 - Looks at the shop's own products first (active **and archived**), then Open Food Facts / Beauty Facts / Products Facts. Results only **prefill**; nothing is saved automatically.
