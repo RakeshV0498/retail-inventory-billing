@@ -51,6 +51,12 @@ Add-product form (`ProductForm`): scan (camera), type, or USB scanner + Enter; t
 - Client components must not import `@/db/schema`; shared enums live in `src/lib/constants.ts`.
 - Medicines are mostly absent from free databases, so manual entry is normal there; the barcode is remembered locally after the first save.
 
+## Editing products, batches and stock counts
+- `updateProduct` / `updateBatch` / `adjustStock` in `src/services/inventory.ts`. Price/GST edits affect future sales only (invoice items snapshot).
+- Unit may change freely among pcs/strip/bottle; other unit changes only while the product has no history. "Sold loose" can't be turned off while fractional stock exists.
+- Quantity is never edited directly: `adjustStock` needs a reason and writes a signed `adjustment` movement in the same transaction (invariant: qty == Σ movements).
+- `ProductForm` is dual-mode (create/edit); `lookupBarcode({ excludeProductId })` stops a product flagging its own barcode as a duplicate.
+
 ## Expired stock, archive and delete
 - Write-off (`writeOffBatch`, `writeOffExpired`) goes through `writeOffInTx`: batch update + `expired_wastage` movement in one transaction.
 - Written-off (qty 0) batches are hidden by default (`getProductBatches`); the ledger is never deleted.

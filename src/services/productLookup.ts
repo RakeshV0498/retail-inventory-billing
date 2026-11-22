@@ -1,4 +1,4 @@
-import { inArray } from "drizzle-orm";
+import { and, inArray, ne } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { products } from "@/db/schema";
 import { isValidGtin, lookupVariants, normalizeBarcode } from "@/lib/barcode";
@@ -46,6 +46,8 @@ export interface LookupOptions {
   fetchImpl?: typeof fetch;
   sources?: LookupSource[];
   now?: number;
+  /** When editing a product, its own barcode is not a duplicate. */
+  excludeProductId?: number;
 }
 
 const cache = new Map<string, { at: number; suggestions: Suggestion[] }>();
@@ -93,7 +95,11 @@ export async function lookupBarcode(db: Db, raw: string, opts: LookupOptions = {
   const mine = db
     .select({ id: products.id, name: products.name, isActive: products.isActive })
     .from(products)
-    .where(inArray(products.barcode, variants))
+    .where(
+      opts.excludeProductId === undefined
+        ? inArray(products.barcode, variants)
+        : and(inArray(products.barcode, variants), ne(products.id, opts.excludeProductId)),
+    )
     .get();
   if (mine) return { barcode, valid, local: mine, suggestions: [], status: "found" };
 

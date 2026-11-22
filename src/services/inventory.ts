@@ -78,6 +78,129 @@ export function createProduct(db: Db, raw: ProductInput): Product {
   }
 }
 
+const COUNTABLE_UNITS = new Set<string>(["pcs", "strip", "bottle"]);
+
+/**
+ * Edit a product. Safety rules keep stored quantities meaningful:
+ *  - unit can change freely among pcs/strip/bottle; any other change only while the product has no history;
+ *  - "sold loose" can be turned off only if no batch holds a fractional quantity.
+ * GST/price edits affect future sales only (invoice items snapshot their values).
+ */
+export function updateProduct(db: Db, id: number, raw: ProductInput): Product {
+  const input = productInput.parse(raw);
+  return db.transaction((tx) => {
+    const cur = tx.select().from(products).where(eq(products.id, id)).get();
+    if (!cur) throw new ServiceError("NOT_FOUND", "Product not found");
+    if (!input.allowDecimalQty && input.lowStockThreshold % MILLI !== 0) {
+      throw new ServiceError("INVALID", "Low-stock threshold must be a whole number for this product");
+    }
+    if (input.unitType !== cur.unitType) {
+      const sameFamily = COUNTABLE_UNITS.has(input.unitType) && COUNTABLE_UNITS.has(cur.unitType);
+      if (!sameFamily && productHasHistory(tx, id)) {
+        throw new ServiceError("UNIT_LOCKED", `The unit can't change from ${cur.unitType} to ${input.unitType} because this product already has stock history. Archive it and add a new product instead`);
+      }
+    }
+    if (cur.allowDecimalQty && !input.allowDecimalQty) {
+      const fractional = tx
+        .select({ id: batches.id })
+        .from(batches)
+        .where(and(eq(batches.productId, id), sql`${batches.quantityAvailable} % ${MILLI} != 0`))
+        .get();
+      if (fractional) throw new ServiceError("DECIMAL_LOCKED", "Some stock is held in fractions (e.g. 0.5), so \"sold loose\" can't be turned off");
+    }
+    try {
+      return tx
+        .update(products)
+        .set({ ...input, barcode: input.barcode ?? null, hsnCode: input.hsnCode ?? null })
+        .where(eq(products.id, id))
+        .returning()
+        .get();
+    } catch (e) {
+      if (e instanceof Error && /UNIQUE/i.test(e.message)) {
+        throw new ServiceError("DUPLICATE", "Another product already has this SKU or barcode (it may be archived)");
+      }
+      throw e;
+    }
+  });
+}
+
+export const batchEditInput = z
+  .object({
+    batchNumber: z.string().trim().min(1).max(60),
+    mfgDate: isoDate.nullish(),
+    expiryDate: isoDate.nullish(),
+    /** paise */
+    purchasePrice: z.number().int().min(0),
+    mrp: z.number().int().min(0),
+    sellingPrice: z.number().int().min(0),
+  })
+  .refine((b) => b.sellingPrice <= b.mrp, { message: "Selling price cannot exceed MRP", path: ["sellingPrice"] })
+  .refine((b) => !b.mfgDate || !b.expiryDate || b.mfgDate <= b.expiryDate, {
+    message: "Expiry must be after manufacturing date",
+    path: ["expiryDate"],
+  });
+export type BatchEditInput = z.input<typeof batchEditInput>;
+
+/** Correct a batch's number, dates or prices (not its quantity: use adjustStock). Prices affect future sales only. */
+export function updateBatch(db: Db, batchId: number, raw: BatchEditInput): Batch {
+  const input = batchEditInput.parse(raw);
+  try {
+    const row = db
+      .update(batches)
+      .set({
+        batchNumber: input.batchNumber,
+        mfgDate: input.mfgDate ?? null,
+        expiryDate: input.expiryDate ?? null,
+        purchasePrice: input.purchasePrice,
+        mrp: input.mrp,
+        sellingPrice: input.sellingPrice,
+      })
+      .where(eq(batches.id, batchId))
+      .returning()
+      .get();
+    if (!row) throw new ServiceError("NOT_FOUND", "Batch not found");
+    return row;
+  } catch (e) {
+    if (e instanceof Error && /UNIQUE/i.test(e.message)) {
+      throw new ServiceError("DUPLICATE", "Another batch of this product already has that batch number");
+    }
+    throw e;
+  }
+}
+
+/**
+ * Set a batch's quantity to a counted value (typo in stock-in, damaged goods, sample...). Writes a signed
+ * `adjustment` movement in the same transaction so quantity always equals the ledger sum. Returns the delta (milli).
+ */
+export function adjustStock(db: Db, batchId: number, newQuantity: number, reason: string, now: Date = new Date()): number {
+  const why = reason.trim();
+  if (!why) throw new ServiceError("REASON_REQUIRED", "Please give a reason for the correction");
+  if (why.length > 200) throw new ServiceError("INVALID", "Reason is too long (200 characters max)");
+  return db.transaction((tx) => {
+    const batch = tx.select().from(batches).where(eq(batches.id, batchId)).get();
+    if (!batch) throw new ServiceError("NOT_FOUND", "Batch not found");
+    const product = tx.select().from(products).where(eq(products.id, batch.productId)).get();
+    if (!Number.isInteger(newQuantity) || newQuantity < 0) throw new ServiceError("INVALID_QTY", "Quantity can't be negative");
+    if (product && !product.allowDecimalQty && newQuantity % MILLI !== 0) {
+      throw new ServiceError("INVALID_QTY", "This product only supports whole quantities");
+    }
+    const delta = newQuantity - batch.quantityAvailable;
+    if (delta === 0) return 0;
+    tx.update(batches).set({ quantityAvailable: newQuantity }).where(eq(batches.id, batchId)).run();
+    tx.insert(stockMovements)
+      .values({
+        productId: batch.productId,
+        batchId,
+        type: "adjustment",
+        quantityDelta: delta,
+        note: why,
+        createdAt: now.toISOString(),
+      })
+      .run();
+    return delta;
+  });
+}
+
 /** Add a stock batch (or top up an existing batch number) and write a `purchase_in` movement. */
 export function addBatch(db: Db, raw: BatchInput, now: Date = new Date()): Batch {
   const input = batchInput.parse(raw);

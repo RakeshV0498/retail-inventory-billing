@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { createProductAction, lookupBarcodeAction } from "@/app/actions";
+import { createProductAction, lookupBarcodeAction, updateProductAction } from "@/app/actions";
 import { BarcodeScannerModal } from "@/components/scanner/BarcodeScannerModal";
 import { CATEGORIES, UNIT_TYPES } from "@/lib/constants";
 import { GST_SLABS } from "@/lib/gst";
@@ -10,6 +10,20 @@ import type { Suggestion } from "@/lib/productLookup";
 import type { LookupResult } from "@/services/productLookup";
 
 type Phase = "idle" | "loading" | "done" | "failed";
+
+/** Values shown when editing an existing product (threshold is in natural units, e.g. "2.5"). */
+export interface EditableProduct {
+  id: number;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  category: string;
+  unitType: string;
+  gstRate: number;
+  hsnCode: string | null;
+  threshold: string;
+  allowDecimalQty: boolean;
+}
 
 const Field = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <label className="block">
@@ -19,11 +33,12 @@ const Field = ({ label, children }: { label: string; children: React.ReactNode }
 );
 
 /** Add-product form: scan or type a barcode first, look it up online, pick a match to prefill, then finish by hand. */
-export function ProductForm({ initialBarcode = "" }: { initialBarcode?: string }) {
-  const [barcode, setBarcode] = useState(initialBarcode);
-  const [name, setName] = useState("");
-  const [sku, setSku] = useState("");
-  const [category, setCategory] = useState<string>("grocery");
+export function ProductForm({ initialBarcode = "", product }: { initialBarcode?: string; product?: EditableProduct }) {
+  const editing = !!product;
+  const [barcode, setBarcode] = useState(product?.barcode ?? initialBarcode);
+  const [name, setName] = useState(product?.name ?? "");
+  const [sku, setSku] = useState(product?.sku ?? "");
+  const [category, setCategory] = useState<string>(product?.category ?? "grocery");
   const [phase, setPhase] = useState<Phase>("idle");
   const [result, setResult] = useState<LookupResult | null>(null);
   const [filledFrom, setFilledFrom] = useState<string | null>(null);
@@ -37,7 +52,7 @@ export function ProductForm({ initialBarcode = "" }: { initialBarcode?: string }
     setResult(null);
     setFilledFrom(null);
     try {
-      const res = await lookupBarcodeAction(code);
+      const res = await lookupBarcodeAction(code, product?.id);
       if (mine !== run.current) return;
       setResult(res);
       setPhase("done");
@@ -48,21 +63,22 @@ export function ProductForm({ initialBarcode = "" }: { initialBarcode?: string }
     } catch {
       if (mine === run.current) setPhase("failed");
     }
-  }, []);
+  }, [product?.id]);
 
   useEffect(() => {
-    if (initialBarcode) void lookup(initialBarcode);
-  }, [initialBarcode, lookup]);
+    if (initialBarcode && !editing) void lookup(initialBarcode);
+  }, [initialBarcode, editing, lookup]);
 
   const use = (s: Suggestion) => {
     setName(s.name);
-    setCategory(s.category);
+    if (!editing) setCategory(s.category); // when editing, only the name is offered
     setFilledFrom(s.source);
     nameRef.current?.focus();
   };
 
   return (
-    <form action={createProductAction} className="card grid gap-4 md:grid-cols-2">
+    <form action={editing ? updateProductAction : createProductAction} className="card grid gap-4 md:grid-cols-2">
+      {product && <input type="hidden" name="productId" value={product.id} />}
       {/* Barcode first: scan, type, or use a USB scanner (it types the digits and presses Enter). */}
       <div className="space-y-2 md:col-span-2">
         <Field label="Barcode (scan or type)">
@@ -113,18 +129,20 @@ export function ProductForm({ initialBarcode = "" }: { initialBarcode?: string }
         </select>
       </Field>
       <Field label="Unit">
-        <select name="unitType" className="w-full">{UNIT_TYPES.map((u) => <option key={u} value={u}>{u}</option>)}</select>
+        <select name="unitType" defaultValue={product?.unitType ?? "pcs"} className="w-full">{UNIT_TYPES.map((u) => <option key={u} value={u}>{u}</option>)}</select>
+        {editing && <span className="mt-1 block text-xs text-slate-500">pcs / strip / bottle can be swapped any time. Other changes are blocked once there is stock history.</span>}
       </Field>
       <Field label="GST slab">
-        <select name="gstRate" defaultValue="0" className="w-full">{GST_SLABS.map((g) => <option key={g} value={g}>{g}%</option>)}</select>
+        <select name="gstRate" defaultValue={String(product?.gstRate ?? 0)} className="w-full">{GST_SLABS.map((g) => <option key={g} value={g}>{g}%</option>)}</select>
+        {editing && <span className="mt-1 block text-xs text-slate-500">Applies to future bills only. Old invoices keep their GST.</span>}
       </Field>
-      <Field label="HSN code (optional)"><input name="hsnCode" className="w-full" /></Field>
-      <Field label="Low-stock threshold"><input name="lowStockThreshold" type="number" step="any" min="0" defaultValue="0" className="w-full" /></Field>
+      <Field label="HSN code (optional)"><input name="hsnCode" defaultValue={product?.hsnCode ?? ""} className="w-full" /></Field>
+      <Field label="Low-stock threshold"><input name="lowStockThreshold" type="number" step="any" min="0" defaultValue={product?.threshold ?? "0"} className="w-full" /></Field>
       <label className="flex min-h-11 items-center gap-2 md:col-span-2">
-        <input type="checkbox" name="allowDecimalQty" className="size-5 min-h-0" />
+        <input type="checkbox" name="allowDecimalQty" defaultChecked={product?.allowDecimalQty ?? false} className="size-5 min-h-0" />
         <span className="text-sm">Sold loose (allow decimal qty, e.g. 0.25 kg)</span>
       </label>
-      <div className="md:col-span-2"><button className="btn-primary min-h-12 w-full md:w-auto">Save &amp; add stock</button></div>
+      <div className="md:col-span-2"><button className="btn-primary min-h-12 w-full md:w-auto">{editing ? "Save changes" : "Save & add stock"}</button></div>
 
       {scanning && (
         <BarcodeScannerModal

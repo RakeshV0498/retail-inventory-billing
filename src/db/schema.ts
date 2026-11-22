@@ -10,7 +10,7 @@ import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-o
 import { CATEGORIES, UNIT_TYPES } from "../lib/constants";
 export { CATEGORIES, UNIT_TYPES };
 export const PAYMENT_MODES = ["cash", "upi", "card", "split"] as const;
-export const MOVEMENT_TYPES = ["purchase_in", "sale_out", "return", "expired_wastage"] as const;
+export const MOVEMENT_TYPES = ["purchase_in", "sale_out", "return", "expired_wastage", "adjustment"] as const;
 export const DISCOUNT_TYPES = ["none", "percent", "flat"] as const;
 
 const createdAt = () =>

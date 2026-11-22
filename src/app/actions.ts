@@ -10,12 +10,15 @@ import { toMilli } from "@/lib/qty";
 import { createInvoice, type InvoiceInput } from "@/services/billing";
 import {
   addBatch,
+  adjustStock,
   archiveProduct,
   createProduct,
   deleteProduct,
   findByBarcode,
   restoreProduct,
   searchProducts,
+  updateBatch,
+  updateProduct,
   writeOffBatch,
   writeOffExpired,
   type ProductStock,
@@ -60,9 +63,10 @@ export async function checkoutAction(input: InvoiceInput): Promise<CheckoutResul
 }
 
 /** Look a scanned/typed barcode up in the shop's own inventory, then online (Open Food Facts family). */
-export async function lookupBarcodeAction(code: string): Promise<LookupResult> {
+export async function lookupBarcodeAction(code: string, excludeProductId?: number): Promise<LookupResult> {
   await requireAuth();
-  return lookupBarcode(getDb(), String(code).slice(0, 40));
+  const exclude = Number.isInteger(excludeProductId) ? excludeProductId : undefined;
+  return lookupBarcode(getDb(), String(code).slice(0, 40), { excludeProductId: exclude });
 }
 
 /* ---------- Inventory ---------- */
@@ -89,6 +93,67 @@ export async function createProductAction(form: FormData) {
   }
   revalidatePath("/inventory");
   redirect(`/inventory/${id}`);
+}
+
+export async function updateProductAction(form: FormData) {
+  await requireAuth();
+  const id = Number(str(form, "productId"));
+  let error: string | null = null;
+  try {
+    updateProduct(getDb(), id, {
+      name: str(form, "name"),
+      sku: str(form, "sku"),
+      barcode: optStr(form, "barcode"),
+      category: str(form, "category") as "grocery",
+      unitType: str(form, "unitType") as "pcs",
+      allowDecimalQty: form.get("allowDecimalQty") === "on",
+      lowStockThreshold: toMilli(str(form, "lowStockThreshold") || "0"),
+      gstRate: Number(str(form, "gstRate")) as 0,
+      hsnCode: optStr(form, "hsnCode"),
+    });
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/inventory/${id}/edit?error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect(`/inventory/${id}?ok=1`);
+}
+
+export async function updateBatchAction(form: FormData) {
+  await requireAuth();
+  const productId = Number(str(form, "productId"));
+  const batchId = Number(str(form, "batchId"));
+  let error: string | null = null;
+  try {
+    updateBatch(getDb(), batchId, {
+      batchNumber: str(form, "batchNumber"),
+      mfgDate: optStr(form, "mfgDate"),
+      expiryDate: optStr(form, "expiryDate"),
+      purchasePrice: rupeesToPaise(str(form, "purchasePrice")),
+      mrp: rupeesToPaise(str(form, "mrp")),
+      sellingPrice: rupeesToPaise(str(form, "sellingPrice")),
+    });
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/inventory/${productId}/batches/${batchId}?error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect(`/inventory/${productId}?ok=1`);
+}
+
+export async function adjustStockAction(form: FormData) {
+  await requireAuth();
+  const productId = Number(str(form, "productId"));
+  const batchId = Number(str(form, "batchId"));
+  let error: string | null = null;
+  try {
+    adjustStock(getDb(), batchId, toMilli(str(form, "newQuantity")), str(form, "reason"));
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/inventory/${productId}/batches/${batchId}?error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect(`/inventory/${productId}?ok=1`);
 }
 
 export async function addBatchAction(form: FormData) {

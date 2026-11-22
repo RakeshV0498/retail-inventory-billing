@@ -26,6 +26,7 @@ For real use, self-host on a PC / Raspberry Pi (see Quick start).
 
 ## Features
 - Products with batches, MFG/expiry, MRP/selling/purchase price, GST slabs (0/5/12/18), loose (decimal) quantities
+- Edit products and batches (fix names, GST, barcodes, prices); correct a stock count with a reason, recorded in the stock history
 - Low-stock and near-expiry (30/60 day) alerts; write off expired stock (one batch or all at once, with cost lost), archive/restore products, delete mistakes
 - Add product: scan the barcode (camera or USB scanner), look it up online (Open Food Facts, free, no key), pick a match to prefill, finish by hand. Items already in your inventory are detected
 - POS: instant search, camera + USB scan, **FEFO** batch allocation, expired batches blocked, live GST, item discounts,

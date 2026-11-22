@@ -38,7 +38,10 @@ export default async function ProductPage({
     <div className="mx-auto max-w-4xl space-y-4">
       <div>
         <Link href="/inventory" className="text-sm text-emerald-800 hover:underline">← Inventory</Link>
-        <h1 className="text-xl font-bold md:text-2xl">{product.name}</h1>
+        <div className="flex items-start justify-between gap-3">
+          <h1 className="text-xl font-bold md:text-2xl">{product.name}</h1>
+          <Link href={`/inventory/${product.id}/edit`} className="btn-secondary min-h-10 shrink-0 px-3 text-sm">Edit product</Link>
+        </div>
         <p className="text-sm text-slate-600">
           {product.sku} · {product.category} · per {product.unitType} · GST {product.gstRate}%
           {product.barcode && <> · barcode {product.barcode}</>}
@@ -67,6 +70,7 @@ export default async function ProductPage({
               <tr key={b.id} className={isExpired(b.expiryDate, today) ? "bg-red-50" : ""}>
                 <td className="td font-medium">
                   {b.batchNumber}
+                  <Link href={`/inventory/${product.id}/batches/${b.id}`} className="ml-2 text-xs font-normal text-emerald-800 hover:underline">Edit</Link>
                   {isExpired(b.expiryDate, today) && b.quantityAvailable > 0 && (
                     <form action={writeOffAction} className="mt-1 md:hidden">
                       <input type="hidden" name="batchId" value={b.id} />
