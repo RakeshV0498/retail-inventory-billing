@@ -23,16 +23,16 @@ function legacyDb() {
 describe("runMigrations", () => {
   it("builds a brand-new database from scratch and is a no-op the second time", () => {
     const d = new Database(":memory:");
-    expect(runMigrations(d, FOLDER)).toEqual({ baselined: false, applied: sqlFiles.length });
+    expect(runMigrations(d, FOLDER)).toEqual({ baselined: false, applied: sqlFiles.length, legacyPinConverted: false });
     expect(tables(d)).toEqual(expect.arrayContaining(["products", "batches", "invoices", "customers", "payments"]));
-    expect(runMigrations(d, FOLDER)).toEqual({ baselined: false, applied: 0 });
+    expect(runMigrations(d, FOLDER)).toEqual({ baselined: false, applied: 0, legacyPinConverted: false });
   });
 
   it("upgrades a legacy (push-created) database that already holds data, without losing any of it", () => {
     const d = legacyDb();
     expect(tables(d)).not.toContain("customers");
     const res = runMigrations(d, FOLDER);
-    expect(res).toEqual({ baselined: true, applied: sqlFiles.length - 1 });
+    expect(res).toEqual({ baselined: true, applied: sqlFiles.length - 1, legacyPinConverted: false });
     expect(tables(d)).toEqual(expect.arrayContaining(["customers", "payments", "__drizzle_migrations"]));
     expect(cols(d, "invoices")).toEqual(expect.arrayContaining(["credit_amount", "customer_id"]));
     expect(d.prepare("select count(*) n from products").get()).toEqual({ n: 1 });
@@ -47,14 +47,51 @@ describe("runMigrations", () => {
   it("running again after a legacy upgrade does nothing", () => {
     const d = legacyDb();
     runMigrations(d, FOLDER);
-    expect(runMigrations(d, FOLDER)).toEqual({ baselined: false, applied: 0 });
+    expect(runMigrations(d, FOLDER)).toEqual({ baselined: false, applied: 0, legacyPinConverted: false });
   });
 
   it("leaves an already-tracked database alone", () => {
     const d = new Database(":memory:");
     runMigrations(d, FOLDER);
     d.exec("insert into products (name, sku, category, unit_type, gst_rate) values ('X','X1','grocery','pcs',0)");
-    expect(runMigrations(d, FOLDER)).toEqual({ baselined: false, applied: 0 });
+    expect(runMigrations(d, FOLDER)).toEqual({ baselined: false, applied: 0, legacyPinConverted: false });
     expect(d.prepare("select count(*) n from products").get()).toEqual({ n: 1 });
+  });
+});
+
+describe("legacy shared PIN -> admin account", () => {
+  const legacyWithPin = () => {
+    const d = legacyDb(); // schema 0000 with data, no history table
+    d.exec("insert into settings (key, value) values ('pinHash', 'scrypt$aa$bb'), ('sessionSecret', 'keepme'), ('storeName', 'My Shop')");
+    return d;
+  };
+
+  it("keeps the same PIN hash as the admin user and removes the old setting", () => {
+    const d = legacyWithPin();
+    expect(runMigrations(d, FOLDER).legacyPinConverted).toBe(true);
+    expect(d.prepare("select username, display_name, pin_hash, role, is_active, session_version from users").all()).toEqual([
+      { username: "admin", display_name: "Admin", pin_hash: "scrypt$aa$bb", role: "admin", is_active: 1, session_version: 0 },
+    ]);
+    expect(d.prepare("select key from settings order by key").all()).toEqual([{ key: "sessionSecret" }, { key: "storeName" }]);
+    expect(d.prepare("select count(*) n from products").get()).toEqual({ n: 1 }); // data untouched
+  });
+
+  it("does nothing on the next run, and nothing at all when no PIN was set", () => {
+    const d = legacyWithPin();
+    runMigrations(d, FOLDER);
+    expect(runMigrations(d, FOLDER).legacyPinConverted).toBe(false);
+    expect(d.prepare("select count(*) n from users").get()).toEqual({ n: 1 });
+    const none = legacyDb();
+    expect(runMigrations(none, FOLDER).legacyPinConverted).toBe(false);
+    expect(none.prepare("select count(*) n from users").get()).toEqual({ n: 0 });
+  });
+
+  it("never overwrites existing accounts", () => {
+    const d = new Database(":memory:");
+    runMigrations(d, FOLDER);
+    d.exec("insert into users (username, display_name, pin_hash, role) values ('owner','Owner','h1','admin')");
+    d.exec("insert into settings (key, value) values ('pinHash', 'stale')");
+    expect(runMigrations(d, FOLDER).legacyPinConverted).toBe(false);
+    expect(d.prepare("select username from users").all()).toEqual([{ username: "owner" }]);
   });
 });

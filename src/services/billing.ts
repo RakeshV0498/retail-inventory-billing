@@ -1,4 +1,4 @@
-import { eq, like, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, like, lt, sql } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "@/db/client";
 import {
@@ -13,7 +13,7 @@ import {
   type Invoice,
   type InvoiceItem,
 } from "@/db/schema";
-import { todayISO } from "@/lib/dates";
+import { rangeBounds, todayISO } from "@/lib/dates";
 import { allocateFefo, StockError } from "@/lib/fefo";
 import {
   calcInvoiceTotals,
@@ -24,6 +24,7 @@ import {
   type LineResult,
 } from "@/lib/gst";
 import { assertValidQty, QtyError } from "@/lib/qty";
+import type { Actor } from "./audit";
 import { markdownFromRules } from "./inventory";
 import { ServiceError } from "./types";
 
@@ -66,7 +67,7 @@ export interface InvoiceWithItems {
  * Create an invoice atomically: FEFO-allocate every cart line, decrement batches, write items and
  * `sale_out` ledger rows. Expired and insufficient stock abort the whole sale (nothing is written).
  */
-export function createInvoice(db: Db, raw: InvoiceInput, now: Date = new Date()): InvoiceWithItems {
+export function createInvoice(db: Db, raw: InvoiceInput, now: Date = new Date(), actor: Actor | null = null): InvoiceWithItems {
   const input = invoiceInput.parse(raw);
   const today = todayISO(now);
   const ts = now.toISOString();
@@ -213,6 +214,8 @@ export function createInvoice(db: Db, raw: InvoiceInput, now: Date = new Date())
         upiAmount: upi,
         cardAmount: card,
         creditAmount: credit,
+        createdBy: actor?.id ?? null,
+        createdByName: actor?.name ?? null,
         createdAt: ts,
       })
       .returning()
@@ -251,6 +254,30 @@ export function getInvoice(db: Db, id: number): InvoiceWithItems | null {
   return { invoice, items };
 }
 
-export function listInvoices(db: Db, limit = 100): Invoice[] {
-  return db.select().from(invoices).orderBy(sql`${invoices.id} desc`).limit(limit).all();
+export interface InvoiceFilter {
+  /** Local calendar days, inclusive (YYYY-MM-DD). */
+  from?: string;
+  to?: string;
+  /** A user id, or "none" for bills with no recorded biller. */
+  userId?: number | "none";
+  status?: "paid" | "void";
+  limit?: number;
+}
+
+/** Newest first. A plain number is accepted as the limit for older callers. */
+export function listInvoices(db: Db, opts: number | InvoiceFilter = 100): Invoice[] {
+  const f: InvoiceFilter = typeof opts === "number" ? { limit: opts } : opts;
+  const where = [
+    f.status ? eq(invoices.status, f.status) : undefined,
+    f.userId === "none" ? isNull(invoices.createdBy) : f.userId !== undefined ? eq(invoices.createdBy, f.userId) : undefined,
+    f.from ? gte(invoices.createdAt, rangeBounds(f.from, f.to ?? f.from).start) : undefined,
+    f.to ? lt(invoices.createdAt, rangeBounds(f.from ?? f.to, f.to).end) : undefined,
+  ].filter((w) => w !== undefined);
+  return db
+    .select()
+    .from(invoices)
+    .where(where.length ? and(...where) : undefined)
+    .orderBy(sql`${invoices.id} desc`)
+    .limit(Math.min(f.limit ?? 100, 1000))
+    .all();
 }

@@ -23,22 +23,72 @@ describe("auth coverage (a new page/action/route must call requireAuth)", () => 
     expect(offenders).toEqual(["app/actions.ts"]);
   });
 
-  it("every exported server action starts with requireAuth(), except login/logout", () => {
+  /** Every server action must be listed here with the permission it needs, so a NEW action forces a decision. */
+  const ACTION_PERMISSIONS: Record<string, string> = {
+    checkoutAction: "sale.create",
+    createCustomerInlineAction: "customer.create",
+    createCustomerAction: "customer.create",
+    updateCustomerAction: "customer.edit",
+    recordPaymentAction: "payment.record",
+    createProductAction: "product.create",
+    updateProductAction: "product.edit",
+    updateBatchAction: "batch.edit",
+    adjustStockAction: "stock.adjust",
+    addBatchAction: "stock.receive",
+    writeOffAction: "stock.writeoff",
+    writeOffFromListAction: "stock.writeoff",
+    writeOffAllExpiredAction: "stock.writeoff",
+    archiveProductAction: "product.archive",
+    restoreProductAction: "product.archive",
+    deleteProductAction: "product.delete",
+    saveSettingsAction: "settings.edit",
+    createUserAction: "users.manage",
+    resetUserPinAction: "users.manage",
+    setUserRoleAction: "users.manage",
+    setUserActiveAction: "users.manage",
+  };
+  /** Any signed-in user (read-only lookups, own PIN, first-run setup that the service itself refuses once accounts exist). */
+  const SIGNED_IN_ONLY = ["searchProductsAction", "barcodeLookupAction", "lookupBarcodeAction", "searchCustomersAction", "changeOwnPinAction", "setupFirstAdminAction"];
+  /** Must work signed out. */
+  const PUBLIC_ACTIONS = ["loginAction", "logoutAction"];
+
+  it("every server action declares exactly the permission it needs", () => {
     const src = read(path.join(ROOT, "app", "actions.ts"));
     const parts = src.split(/\nexport async function /).slice(1);
-    expect(parts.length).toBeGreaterThan(15);
-    const missing = parts
-      .map((p) => ({ name: p.slice(0, p.indexOf("(")), head: p.slice(0, 500) }))
-      .filter(({ name }) => !["loginAction", "logoutAction"].includes(name))
-      .filter(({ head }) => !head.includes("await requireAuth()"))
-      .map((x) => x.name);
-    expect(missing).toEqual([]);
+    expect(parts.length).toBeGreaterThan(25);
+    const known = new Set([...Object.keys(ACTION_PERMISSIONS), ...SIGNED_IN_ONLY, ...PUBLIC_ACTIONS]);
+    const problems: string[] = [];
+    for (const part of parts) {
+      const name = part.slice(0, part.indexOf("("));
+      const head = part.slice(0, 700);
+      if (!known.has(name)) problems.push(`${name}: not classified in security.test.ts`);
+      else if (PUBLIC_ACTIONS.includes(name)) continue;
+      else if (name in ACTION_PERMISSIONS) {
+        if (!head.includes(`requirePermission("${ACTION_PERMISSIONS[name]}")`)) problems.push(`${name}: must call requirePermission("${ACTION_PERMISSIONS[name]}")`);
+      } else if (!head.includes("await requireAuth()")) problems.push(`${name}: must call requireAuth()`);
+    }
+    expect(problems).toEqual([]);
   });
 
-  it("every page under (app) and every route handler calls requireAuth()", () => {
+  it("every page under (app) and every route handler is guarded (requireAuth or requirePermission)", () => {
     const targets = files.filter((f) => /[\\/]\(app\)[\\/].*page\.tsx$/.test(f) || /route\.ts$/.test(f));
-    expect(targets.length).toBeGreaterThan(8);
-    expect(targets.filter((f) => !read(f).includes("requireAuth()")).map(rel)).toEqual([]);
+    expect(targets.length).toBeGreaterThan(10);
+    expect(targets.filter((f) => !/requireAuth\(\)|requirePermission\(/.test(read(f))).map(rel)).toEqual([]);
+  });
+
+  it("admin-only pages and downloads demand their permission", () => {
+    const ADMIN_PAGES: Record<string, string> = {
+      "app/(app)/reports/page.tsx": "reports.view",
+      "app/(app)/reports/export/route.ts": "reports.view",
+      "app/(app)/inventory/[id]/edit/page.tsx": "product.edit",
+      "app/(app)/inventory/[id]/batches/[batchId]/page.tsx": "batch.edit",
+      "app/(app)/inventory/new/page.tsx": "product.create",
+      "app/(app)/activity/page.tsx": "audit.view",
+    };
+    const wrong = Object.entries(ADMIN_PAGES)
+      .filter(([f, perm]) => !read(path.join(ROOT, f)).includes(`requirePermission("${perm}")`))
+      .map(([f, perm]) => `${f} needs requirePermission("${perm}")`);
+    expect(wrong).toEqual([]);
   });
 
   it("the (app) layout also checks auth, and isAuthed reads cookies before any early return", () => {

@@ -8,6 +8,8 @@ export interface MigrationResult {
   baselined: boolean;
   /** Migrations applied by this run. */
   applied: number;
+  /** An old single shared PIN was turned into the `admin` account (same PIN). */
+  legacyPinConverted: boolean;
 }
 
 const countApplied = (sqlite: Database.Database) =>
@@ -21,6 +23,25 @@ const countApplied = (sqlite: Database.Database) =>
  * `push`) have the exact schema of migration 0000 but no history table, so that one is recorded as applied
  * first; only the newer migrations then run.
  */
+/**
+ * Before accounts existed the app had ONE optional shared PIN (`settings.pinHash`). Turn it into the `admin`
+ * user with the SAME PIN so nobody is locked out by the upgrade. Idempotent: does nothing once any user exists.
+ */
+function convertLegacyPin(sqlite: Database.Database): boolean {
+  const has = (name: string) => !!sqlite.prepare("select 1 from sqlite_master where type = 'table' and name = ?").get(name);
+  if (!has("users") || !has("settings")) return false;
+  return sqlite.transaction(() => {
+    if ((sqlite.prepare("select count(*) n from users").get() as { n: number }).n > 0) return false;
+    const row = sqlite.prepare("select value from settings where key = 'pinHash'").get() as { value: string } | undefined;
+    if (!row) return false;
+    sqlite
+      .prepare("insert into users (username, display_name, pin_hash, role, is_active, session_version) values ('admin', 'Admin', ?, 'admin', 1, 0)")
+      .run(row.value);
+    sqlite.prepare("delete from settings where key = 'pinHash'").run();
+    return true;
+  })();
+}
+
 export function runMigrations(sqlite: Database.Database, migrationsFolder: string): MigrationResult {
   const has = (name: string) => !!sqlite.prepare("select 1 from sqlite_master where type = 'table' and name = ?").get(name);
   const files = readMigrationFiles({ migrationsFolder });
@@ -36,5 +57,6 @@ export function runMigrations(sqlite: Database.Database, migrationsFolder: strin
 
   const before = has("__drizzle_migrations") ? countApplied(sqlite) : 0;
   migrate(drizzle(sqlite), { migrationsFolder });
-  return { baselined, applied: countApplied(sqlite) - before };
+  const legacyPinConverted = convertLegacyPin(sqlite);
+  return { baselined, applied: countApplied(sqlite) - before, legacyPinConverted };
 }

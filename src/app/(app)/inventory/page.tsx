@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireAuth } from "@/lib/session";
+import { getViewer, requireAuth } from "@/lib/session";
 import { getDb } from "@/db/client";
 import { todayISO } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
@@ -78,8 +78,8 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
           <ExpiryTable today={today} rows={getExpiringBatches(db, today, days)} empty="No batches expiring in this window." />
         </>
       )}
-      {tab === "expired" && <ExpiredPanel today={today} />}
-      {tab === "archived" && <ArchivedList />}
+      {tab === "expired" && <ExpiredPanel today={today} canWriteOff={(await getViewer()).can("stock.writeoff")} />}
+      {tab === "archived" && <ArchivedList canRestore={(await getViewer()).can("product.archive")} />}
     </div>
   );
 }
@@ -159,7 +159,7 @@ function ExpiryTable({ rows, today, empty }: { rows: ReturnType<typeof getExpiri
   );
 }
 
-function ExpiredPanel({ today }: { today: string }) {
+function ExpiredPanel({ today, canWriteOff }: { today: string; canWriteOff: boolean }) {
   const rows = getExpiredBatches(getDb(), today);
   const lost = expiredCostLost(rows);
   if (rows.length === 0) {
@@ -172,6 +172,7 @@ function ExpiredPanel({ today }: { today: string }) {
           <div className="font-semibold">{rows.length} expired batch{rows.length === 1 ? "" : "es"} blocked from sale</div>
           <div className="text-sm text-slate-600">Stock value at cost: {formatPaise(lost)}</div>
         </div>
+        {canWriteOff && (
         <form action={writeOffAllExpiredAction}>
           <ConfirmSubmit
             className="btn-danger"
@@ -180,6 +181,7 @@ function ExpiredPanel({ today }: { today: string }) {
             Write off all {rows.length}
           </ConfirmSubmit>
         </form>
+        )}
       </div>
       <div className="card overflow-x-auto p-0">
         <table className="w-full">
@@ -194,6 +196,7 @@ function ExpiredPanel({ today }: { today: string }) {
                 <td className="td text-right">{formatQty(r.batch.quantityAvailable)} {r.product.unitType}</td>
                 <td className="td"><ExpiryBadge expiryDate={r.batch.expiryDate} today={today} /></td>
                 <td className="td text-right">
+                  {canWriteOff && (
                   <form action={writeOffFromListAction}>
                     <input type="hidden" name="batchId" value={r.batch.id} />
                     <ConfirmSubmit
@@ -203,6 +206,7 @@ function ExpiredPanel({ today }: { today: string }) {
                       Write off
                     </ConfirmSubmit>
                   </form>
+                  )}
                 </td>
               </tr>
             ))}
@@ -213,7 +217,7 @@ function ExpiredPanel({ today }: { today: string }) {
   );
 }
 
-function ArchivedList() {
+function ArchivedList({ canRestore }: { canRestore: boolean }) {
   const rows = listArchivedProducts(getDb());
   return (
     <div className="card overflow-x-auto p-0">
@@ -225,10 +229,12 @@ function ArchivedList() {
               <td className="td"><Link href={`/inventory/${p.id}`} className="font-medium hover:underline">{p.name}</Link>
                 <div className="text-xs text-slate-500">{p.sku}</div></td>
               <td className="td text-right">
-                <form action={restoreProductAction}>
-                  <input type="hidden" name="productId" value={p.id} />
-                  <button className="btn-secondary min-h-10 px-3 text-sm">Restore</button>
-                </form>
+                {canRestore && (
+                  <form action={restoreProductAction}>
+                    <input type="hidden" name="productId" value={p.id} />
+                    <button className="btn-secondary min-h-10 px-3 text-sm">Restore</button>
+                  </form>
+                )}
               </td>
             </tr>
           ))}

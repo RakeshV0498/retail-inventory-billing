@@ -39,6 +39,8 @@ export interface SalesReport {
   duesCollected: { cash: number; upi: number; card: number; total: number };
   profitEstimate: number;
   gstSlabs: SlabRow[];
+  /** Net sales per person who billed (null userId = bills with no recorded biller), biggest first. */
+  byUser: { userId: number | null; name: string; invoices: number; netSales: number }[];
   daily: { date: string; invoices: number; total: number }[];
   topProducts: { productId: number; name: string; quantity: number; revenue: number }[];
 }
@@ -86,6 +88,13 @@ export function getSalesReport(db: Db, from: string, to: string): SalesReport {
     dayMap.set(d, { invoices: cur.invoices + 1, total: cur.total + i.grandTotal });
   }
 
+  const userMap = new Map<string, { userId: number | null; name: string; invoices: number; netSales: number }>();
+  for (const i of inv) {
+    const key = String(i.createdBy ?? "none");
+    const cur = userMap.get(key) ?? { userId: i.createdBy, name: i.createdByName ?? "Not recorded", invoices: 0, netSales: 0 };
+    userMap.set(key, { ...cur, invoices: cur.invoices + 1, netSales: cur.netSales + i.grandTotal });
+  }
+
   const prodMap = new Map<number, { name: string; quantity: number; revenue: number }>();
   for (const { item } of items) {
     const cur = prodMap.get(item.productId) ?? { name: item.productName, quantity: 0, revenue: 0 };
@@ -113,6 +122,7 @@ export function getSalesReport(db: Db, from: string, to: string): SalesReport {
     duesCollected: { cash: duesBy("cash"), upi: duesBy("upi"), card: duesBy("card"), total: sum(dues, (p) => p.amount) },
     profitEstimate: estimateProfit(items.map(({ item }) => item)),
     gstSlabs,
+    byUser: [...userMap.values()].sort((a, b) => b.netSales - a.netSales || a.name.localeCompare(b.name)),
     daily: [...dayMap.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([date, v]) => ({ date, ...v })),
     topProducts: [...prodMap.entries()]
       .map(([productId, v]) => ({ productId, ...v }))
@@ -140,11 +150,11 @@ export function buildCsv(
 
   if (type === "sales") {
     const { inv } = loadRange(db, from, to);
-    const header = ["Invoice", "Date", "Customer", "Phone", "Payment", "Subtotal", "Discount", "Taxable", "CGST", "SGST", "Round off", "Credit", "Total"];
+    const header = ["Invoice", "Date", "Customer", "Phone", "Billed by", "Payment", "Subtotal", "Discount", "Taxable", "CGST", "SGST", "Round off", "Credit", "Total"];
     const rows: Cell[][] = inv.map((i) => {
       const { cgst, sgst } = splitGst(i.taxTotal);
       const taxable = i.subtotal - i.discountTotal - i.taxTotal;
-      return [i.invoiceNumber, localDateTime(i.createdAt), i.customerName, i.customerPhone, i.paymentMode,
+      return [i.invoiceNumber, localDateTime(i.createdAt), i.customerName, i.customerPhone, i.createdByName, i.paymentMode,
         money(i.subtotal), money(i.discountTotal), money(taxable), money(cgst), money(sgst), money(i.roundOff), money(i.creditAmount), money(i.grandTotal)];
     });
     return { filename: `sales-${range}.csv`, csv: toCsv(header, rows) };

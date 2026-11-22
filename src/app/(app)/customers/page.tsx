@@ -3,7 +3,7 @@ import { createCustomerAction } from "@/app/actions";
 import { getDb } from "@/db/client";
 import { Field, Notice } from "@/components/ui";
 import { formatPaise } from "@/lib/money";
-import { requireAuth } from "@/lib/session";
+import { getViewer, requireAuth } from "@/lib/session";
 import { listCustomersWithBalance, outstandingTotal } from "@/services/customers";
 
 export const dynamic = "force-dynamic";
@@ -17,6 +17,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   const all = listCustomersWithBalance(db);
   const rows = q ? all.filter((r) => r.customer.name.toLowerCase().includes(q) || (r.customer.phone ?? "").includes(q.replace(/\D/g, "") || "\u0000")) : all;
   const total = outstandingTotal(db);
+  const viewer = await getViewer();
   const owing = all.filter((r) => r.balance > 0).length;
 
   return (
@@ -30,7 +31,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
           <div className={`text-2xl font-bold ${total > 0 ? "text-red-700" : ""}`}>{formatPaise(total)}</div>
           <div className="text-xs text-slate-500">{owing} customer{owing === 1 ? "" : "s"} with dues</div>
         </div>
-        {total > 0 && <a href="/reports/export?type=dues" download className="btn-secondary">Download dues list (CSV)</a>}
+        {total > 0 && viewer.can("reports.view") && <a href="/reports/export?type=dues" download className="btn-secondary">Download dues list (CSV)</a>}
       </div>
 
       <form className="flex gap-2">

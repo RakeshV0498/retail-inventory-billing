@@ -1,5 +1,5 @@
 import { getDb } from "@/db/client";
-import { requireAuth } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
 import { buildCsv, EXPORT_TYPES, type ExportType } from "@/services/reports";
 import { parseRange } from "../range";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 /** GET /reports/export?type=sales|items|gst|stock&from=YYYY-MM-DD&to=YYYY-MM-DD */
 export async function GET(req: Request) {
-  await requireAuth(); // route handlers are not covered by page/layout checks
+  await requirePermission("reports.view"); // route handlers are not covered by page/layout checks
   const url = new URL(req.url);
   const type = url.searchParams.get("type") as ExportType;
   if (!EXPORT_TYPES.includes(type)) return new Response("Unknown export type", { status: 400 });

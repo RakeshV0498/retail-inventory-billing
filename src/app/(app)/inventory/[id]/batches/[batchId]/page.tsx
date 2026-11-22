@@ -8,7 +8,7 @@ import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { Field, Notice } from "@/components/ui";
 import { paiseToDecimal } from "@/lib/money";
 import { formatQty } from "@/lib/qty";
-import { requireAuth } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
 import { getProduct } from "@/services/inventory";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export default async function EditBatchPage({
   params: Promise<{ id: string; batchId: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
-  await requireAuth();
+  await requirePermission("batch.edit");
   const { id, batchId } = await params;
   const { error } = await searchParams;
   const db = getDb();

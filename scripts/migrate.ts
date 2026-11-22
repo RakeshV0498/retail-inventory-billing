@@ -12,4 +12,5 @@ sqlite.pragma("foreign_keys = ON");
 
 const res = runMigrations(sqlite, path.join(process.cwd(), "drizzle"));
 if (res.baselined) console.log("Existing database detected: recorded the original schema as applied.");
+if (res.legacyPinConverted) console.log("Your existing PIN is now the account 'admin' (same PIN). Log in with username: admin");
 console.log(res.applied === 0 ? `Database is up to date (${file})` : `Applied ${res.applied} migration(s) to ${file}`);

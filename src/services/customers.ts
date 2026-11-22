@@ -4,6 +4,7 @@ import type { Db } from "@/db/client";
 import { customers, DUES_PAYMENT_MODES, invoices, payments, type Customer } from "@/db/schema";
 import { formatPaise } from "@/lib/money";
 import { normalizePhone } from "@/lib/phone";
+import type { Actor } from "./audit";
 import { ServiceError, type Q } from "./types";
 
 /**
@@ -192,6 +193,7 @@ export function recordPayment(
   mode: (typeof DUES_PAYMENT_MODES)[number],
   note: string | null = null,
   now: Date = new Date(),
+  actor: Actor | null = null,
 ) {
   const input = paymentInput.parse({ amount, mode, note });
   return db.transaction((tx) => {
@@ -203,7 +205,15 @@ export function recordPayment(
     }
     return tx
       .insert(payments)
-      .values({ customerId, amount: input.amount, mode: input.mode, note: input.note || null, createdAt: now.toISOString() })
+      .values({
+        customerId,
+        amount: input.amount,
+        mode: input.mode,
+        note: input.note || null,
+        createdBy: actor?.id ?? null,
+        createdByName: actor?.name ?? null,
+        createdAt: now.toISOString(),
+      })
       .returning()
       .get();
   });

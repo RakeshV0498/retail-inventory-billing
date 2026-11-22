@@ -7,7 +7,7 @@ import { Field, Notice } from "@/components/ui";
 import { localDateTime } from "@/lib/dates";
 import { formatPaise, paiseToDecimal } from "@/lib/money";
 import { whatsappReminderUrl } from "@/lib/phone";
-import { requireAuth } from "@/lib/session";
+import { getViewer, requireAuth } from "@/lib/session";
 import { balanceOf, getCustomer, getCustomerLedger } from "@/services/customers";
 import { getSettings } from "@/services/settings";
 
@@ -26,6 +26,7 @@ export default async function CustomerPage({
   const db = getDb();
   const customer = getCustomer(db, Number(id));
   if (!customer) notFound();
+  const viewer = await getViewer();
   const balance = balanceOf(db, customer.id);
   const ledger = getCustomerLedger(db, customer.id).reverse(); // newest first
   const reminder = whatsappReminderUrl({ phone: customer.phone, name: customer.name, balance, storeName: getSettings(db).storeName });
@@ -51,7 +52,7 @@ export default async function CustomerPage({
           </div>
         </div>
 
-        {balance > 0 && (
+        {balance > 0 && viewer.can("payment.record") && (
           <form action={recordPaymentAction} className="grid gap-3 border-t border-slate-100 pt-3 md:grid-cols-4">
             <input type="hidden" name="customerId" value={customer.id} />
             <Field label="Amount received (₹)"><input name="amount" inputMode="decimal" required defaultValue={paiseToDecimal(balance)} className="w-full" /></Field>
@@ -70,7 +71,7 @@ export default async function CustomerPage({
       <section className="card overflow-x-auto p-0">
         <div className="flex items-center justify-between p-3">
           <h2 className="font-semibold">History</h2>
-          {ledger.length > 0 && <a href={`/reports/export?type=ledger&customer=${customer.id}`} download className="text-sm text-emerald-800 hover:underline">Download (CSV)</a>}
+          {ledger.length > 0 && viewer.can("reports.view") && <a href={`/reports/export?type=ledger&customer=${customer.id}`} download className="text-sm text-emerald-800 hover:underline">Download (CSV)</a>}
         </div>
         <table className="w-full">
           <thead className="bg-slate-50"><tr><th className="th">When</th><th className="th">Details</th><th className="th text-right">Amount</th><th className="th text-right">Balance</th></tr></thead>
@@ -88,6 +89,7 @@ export default async function CustomerPage({
         </table>
       </section>
 
+      {viewer.can("customer.edit") && (
       <details className="card">
         <summary className="cursor-pointer font-medium">Edit details</summary>
         <form action={updateCustomerAction} className="mt-3 grid gap-3 md:grid-cols-2">
@@ -98,6 +100,7 @@ export default async function CustomerPage({
           <div className="md:col-span-2"><button className="btn-secondary min-h-12 w-full md:w-auto">Save details</button></div>
         </form>
       </details>
+      )}
     </div>
   );
 }

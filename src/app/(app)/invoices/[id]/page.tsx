@@ -58,6 +58,7 @@ export default async function InvoicePage({
           <div className={thermal ? "mt-1" : "text-right"}>
             <p className="font-semibold">TAX INVOICE</p>
             <p>{invoice.invoiceNumber}</p>
+            {invoice.createdByName && <p>Billed by: {invoice.createdByName}</p>}
             <p>{new Date(invoice.createdAt).toLocaleString("en-IN")}</p>
           </div>
         </header>

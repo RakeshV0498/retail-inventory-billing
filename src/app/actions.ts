@@ -32,8 +32,19 @@ import {
   type CustomerWithBalance,
 } from "@/services/customers";
 import { saveSettings } from "@/services/settings";
-import { checkPin, isPinEnabled, removePin, setPin } from "@/services/auth";
-import { endSession, requireAuth, startSession } from "@/lib/session";
+import { endSession, getActor, getCurrentUser, requireAuth, requirePermission, startSession } from "@/lib/session";
+import {
+  actorOf,
+  authenticate,
+  changeOwnPin,
+  createFirstAdmin,
+  createUser,
+  hasUsers,
+  setActive,
+  setRole,
+  setUserPin,
+} from "@/services/users";
+import { ROLES } from "@/db/schema";
 
 function errMsg(e: unknown): string {
   if (e instanceof ZodError) return e.issues[0]?.message ?? "Invalid input";
@@ -59,9 +70,9 @@ export async function barcodeLookupAction(code: string): Promise<ProductStock | 
 export type CheckoutResult = { ok: true; invoiceId: number } | { ok: false; error: string };
 
 export async function checkoutAction(input: InvoiceInput): Promise<CheckoutResult> {
-  await requireAuth();
+  await requirePermission("sale.create");
   try {
-    const { invoice } = createInvoice(getDb(), input);
+    const { invoice } = createInvoice(getDb(), input, new Date(), await getActor());
     revalidatePath("/", "layout");
     return { ok: true, invoiceId: invoice.id };
   } catch (e) {
@@ -88,7 +99,7 @@ export async function createCustomerInlineAction(
   name: string,
   phone: string,
 ): Promise<{ ok: true; customer: { id: number; name: string; phone: string | null } } | { ok: false; error: string }> {
-  await requireAuth();
+  await requirePermission("customer.create");
   try {
     const c = createCustomer(getDb(), { name: String(name).slice(0, 100), phone: String(phone).slice(0, 30) });
     return { ok: true, customer: { id: c.id, name: c.name, phone: c.phone } };
@@ -98,7 +109,7 @@ export async function createCustomerInlineAction(
 }
 
 export async function createCustomerAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("customer.create");
   let id = 0;
   let error: string | null = null;
   try {
@@ -112,7 +123,7 @@ export async function createCustomerAction(form: FormData) {
 }
 
 export async function updateCustomerAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("customer.edit");
   const id = Number(str(form, "customerId"));
   let error: string | null = null;
   try {
@@ -126,13 +137,13 @@ export async function updateCustomerAction(form: FormData) {
 }
 
 export async function recordPaymentAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("payment.record");
   const id = Number(str(form, "customerId"));
   let error: string | null = null;
   try {
     const mode = str(form, "mode");
     if (mode !== "cash" && mode !== "upi" && mode !== "card") throw new Error("Choose how it was paid");
-    recordPayment(getDb(), id, rupeesToPaise(str(form, "amount")), mode, optStr(form, "note"));
+    recordPayment(getDb(), id, rupeesToPaise(str(form, "amount")), mode, optStr(form, "note"), new Date(), await getActor());
   } catch (e) {
     error = errMsg(e);
   }
@@ -144,7 +155,7 @@ export async function recordPaymentAction(form: FormData) {
 /* ---------- Inventory ---------- */
 
 export async function createProductAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("product.create");
   let id: number;
   try {
     const allowDecimal = form.get("allowDecimalQty") === "on";
@@ -168,7 +179,7 @@ export async function createProductAction(form: FormData) {
 }
 
 export async function updateProductAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("product.edit");
   const id = Number(str(form, "productId"));
   let error: string | null = null;
   try {
@@ -192,7 +203,7 @@ export async function updateProductAction(form: FormData) {
 }
 
 export async function updateBatchAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("batch.edit");
   const productId = Number(str(form, "productId"));
   const batchId = Number(str(form, "batchId"));
   let error: string | null = null;
@@ -214,7 +225,7 @@ export async function updateBatchAction(form: FormData) {
 }
 
 export async function adjustStockAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("stock.adjust");
   const productId = Number(str(form, "productId"));
   const batchId = Number(str(form, "batchId"));
   let error: string | null = null;
@@ -229,7 +240,7 @@ export async function adjustStockAction(form: FormData) {
 }
 
 export async function addBatchAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("stock.receive");
   const productId = Number(str(form, "productId"));
   try {
     addBatch(getDb(), {
@@ -250,7 +261,7 @@ export async function addBatchAction(form: FormData) {
 }
 
 export async function writeOffAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("stock.writeoff");
   const productId = Number(str(form, "productId"));
   try {
     writeOffBatch(getDb(), Number(str(form, "batchId")));
@@ -263,7 +274,7 @@ export async function writeOffAction(form: FormData) {
 
 /** Single batch write-off from the Expired tab. */
 export async function writeOffFromListAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("stock.writeoff");
   let error: string | null = null;
   try {
     writeOffBatch(getDb(), Number(str(form, "batchId")));
@@ -276,14 +287,14 @@ export async function writeOffFromListAction(form: FormData) {
 }
 
 export async function writeOffAllExpiredAction() {
-  await requireAuth();
+  await requirePermission("stock.writeoff");
   const res = writeOffExpired(getDb(), todayISO());
   revalidatePath("/", "layout");
   redirect(`/inventory?tab=expired&done=${res.batches}`);
 }
 
 export async function archiveProductAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("product.archive");
   const id = Number(str(form, "productId"));
   let error: string | null = null;
   try {
@@ -297,7 +308,7 @@ export async function archiveProductAction(form: FormData) {
 }
 
 export async function restoreProductAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("product.archive");
   const id = Number(str(form, "productId"));
   let error: string | null = null;
   try {
@@ -311,7 +322,7 @@ export async function restoreProductAction(form: FormData) {
 }
 
 export async function deleteProductAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("product.delete");
   const id = Number(str(form, "productId"));
   let error: string | null = null;
   try {
@@ -327,7 +338,7 @@ export async function deleteProductAction(form: FormData) {
 /* ---------- Settings ---------- */
 
 export async function saveSettingsAction(form: FormData) {
-  await requireAuth();
+  await requirePermission("settings.edit");
   const fmt = str(form, "printFormat");
   saveSettings(getDb(), {
     storeName: str(form, "storeName").slice(0, 100) || "My Store",
@@ -342,17 +353,18 @@ export async function saveSettingsAction(form: FormData) {
   redirect("/settings?ok=1");
 }
 
-/* ---------- PIN / session ---------- */
+
+/* ---------- Accounts & sessions ---------- */
 
 export async function loginAction(form: FormData) {
   const db = getDb();
-  if (!isPinEnabled(db)) redirect("/");
-  const res = checkPin(db, str(form, "pin"));
+  if (!hasUsers(db)) redirect("/");
+  const res = authenticate(db, str(form, "username"), str(form, "pin"));
   if (!res.ok) {
-    const msg = res.locked ? `Too many attempts. Try again in ${res.retryAfterSec}s.` : "Wrong PIN";
+    const msg = res.locked ? `Too many attempts. Try again in ${res.retryAfterSec}s.` : "Wrong username or PIN";
     redirect(`/login?error=${encodeURIComponent(msg)}`);
   }
-  await startSession();
+  await startSession(res.user.id);
   redirect("/");
 }
 
@@ -361,33 +373,101 @@ export async function logoutAction() {
   redirect("/login");
 }
 
-export async function setPinAction(form: FormData) {
-  await requireAuth();
-  const pin = str(form, "newPin");
+/** First-run: create the first admin (only works while no accounts exist), then sign them in. */
+export async function setupFirstAdminAction(form: FormData) {
+  await requireAuth(); // open while no accounts exist; once they do you must be signed in (and the service refuses anyway)
+  let id = 0;
   let error: string | null = null;
+  const pin = str(form, "pin");
   if (pin !== str(form, "confirmPin")) error = "PINs do not match";
   else {
     try {
-      setPin(getDb(), pin, str(form, "currentPin"));
+      id = createFirstAdmin(getDb(), { username: str(form, "username"), displayName: str(form, "displayName"), pin }).id;
     } catch (e) {
       error = errMsg(e);
     }
   }
-  if (error) redirect(`/settings?pinerror=${encodeURIComponent(error)}`);
-  // Rotating the secret signed everyone out, including this browser; sign it back in.
-  await startSession();
+  if (error) redirect(`/settings?accounterror=${encodeURIComponent(error)}`);
+  await startSession(id);
+  revalidatePath("/", "layout");
   redirect("/settings?ok=1");
 }
 
-export async function removePinAction(form: FormData) {
+/** Anyone signed in can change their OWN PIN (current PIN required). */
+export async function changeOwnPinAction(form: FormData) {
   await requireAuth();
+  const user = await getCurrentUser();
+  let error: string | null = null;
+  if (!user) error = "Set up accounts first";
+  else if (str(form, "newPin") !== str(form, "confirmPin")) error = "PINs do not match";
+  else {
+    try {
+      changeOwnPin(getDb(), user.id, str(form, "currentPin"), str(form, "newPin"));
+    } catch (e) {
+      error = errMsg(e);
+    }
+  }
+  if (error || !user) redirect(`/settings?pinerror=${encodeURIComponent(error ?? "Not signed in")}`);
+  await startSession(user.id); // the PIN change invalidated every session, including this one
+  redirect("/settings?ok=1");
+}
+
+export async function createUserAction(form: FormData) {
+  const me = await requirePermission("users.manage");
   let error: string | null = null;
   try {
-    removePin(getDb(), str(form, "currentPin"));
+    const role = str(form, "role");
+    if (!ROLES.includes(role as "admin")) throw new Error("Choose a role");
+    createUser(
+      getDb(),
+      { username: str(form, "username"), displayName: str(form, "displayName"), pin: str(form, "pin"), role: role as "admin" },
+      actorOf(me),
+    );
   } catch (e) {
     error = errMsg(e);
   }
-  if (error) redirect(`/settings?pinerror=${encodeURIComponent(error)}`);
-  await endSession();
+  if (error) redirect(`/settings?accounterror=${encodeURIComponent(error)}`);
+  revalidatePath("/settings");
+  redirect("/settings?ok=1");
+}
+
+export async function resetUserPinAction(form: FormData) {
+  const me = await requirePermission("users.manage");
+  let error: string | null = null;
+  try {
+    setUserPin(getDb(), Number(str(form, "userId")), str(form, "pin"), actorOf(me));
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/settings?accounterror=${encodeURIComponent(error)}`);
+  revalidatePath("/settings");
+  redirect("/settings?ok=1");
+}
+
+export async function setUserRoleAction(form: FormData) {
+  const me = await requirePermission("users.manage");
+  let error: string | null = null;
+  try {
+    const role = str(form, "role");
+    if (!ROLES.includes(role as "admin")) throw new Error("Choose a role");
+    setRole(getDb(), Number(str(form, "userId")), role as "admin", actorOf(me));
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/settings?accounterror=${encodeURIComponent(error)}`);
+  revalidatePath("/settings");
+  redirect("/settings?ok=1");
+}
+
+export async function setUserActiveAction(form: FormData) {
+  const me = await requirePermission("users.manage");
+  let error: string | null = null;
+  try {
+    setActive(getDb(), Number(str(form, "userId")), str(form, "active") === "1", actorOf(me));
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/settings?accounterror=${encodeURIComponent(error)}`);
+  revalidatePath("/settings");
   redirect("/settings?ok=1");
 }

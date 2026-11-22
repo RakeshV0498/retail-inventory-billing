@@ -35,7 +35,7 @@ For real use, self-host on a PC / Raspberry Pi (see Quick start).
 - Customer credit (udhaar): sell on credit or part-pay, record payments, see who owes what, WhatsApp reminder links, dues CSV
 - Reports (`/reports`): sales, discounts, GST by slab (CGST/SGST), payments, daily sales, top products; CSV export for your accountant
 - Dashboard: today's sales, profit estimate, low stock, expiring soon
-- Optional PIN login (Settings → PIN protection), 30-day sessions, lockout after 5 wrong tries
+- Accounts: username + PIN for admins and staff, every bill records who made it, activity log, per-user sales report; staff can bill and receive stock, admins control everything else (30-day sessions, per-user lockout)
 - Shortcuts (desktop): `F2` search · `Enter` add · `F9` pay · `Ctrl+P` print
 
 ## Barcode lookup (online)
@@ -44,7 +44,7 @@ Only the barcode number is sent. The device needs internet access; without it yo
 Coverage is good for packaged groceries, poor for medicines. Your own database remembers every barcode you save.
 
 ## Security
-Optional PIN login, security headers on every response, capped inputs, and `npm run audit:prod` (currently 0 findings).
+Username + PIN accounts with admin/staff roles, security headers on every response, capped inputs, and `npm run audit:prod` (currently 0 findings).
 Keep the app on your LAN/Tailscale; it is not meant to be exposed to the public internet.
 
 ## Develop

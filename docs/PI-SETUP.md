@@ -138,19 +138,26 @@ npm ci && npm run build && npm run db:push
 sudo systemctl restart retail-billing
 ```
 Check: `systemctl is-active retail-billing` is `active` and the app loads.
-Releases that only add pages/settings (PIN login, reports) need no database migration; `db:push` is still safe to run.
+Always run `db:push` when updating: some releases add database tables/columns (it is safe on your existing data and asks no questions).
 If the update breaks things: `git log --oneline -5`, `git checkout <previous-commit>`, rebuild, restart, and restore the backup if the data was affected (ask first).
 
-## 8b. Optional: PIN login (needs release with PIN support)
-Open **Settings → PIN protection** in the app and turn on a 4–12 digit PIN. Sessions last 30 days; 5 wrong tries lock logins for 60 s.
-Changing or removing the PIN signs everyone out. Forgot it? Stop the app, then:
-`sqlite3 ~/retail-inventory-billing/data/app.db "delete from settings where key in ('pinHash','sessionSecret');"` and start it again
-(ask the owner first, and take a backup before touching the database).
+## 8b. Accounts (admin and staff)
+- **Already had a PIN?** After updating, it became the account `admin` with the **same PIN**. Sign in with username `admin` and your old PIN (everyone is signed out once by the update).
+- **No PIN yet?** Open the app, then Settings, then **Set up accounts**: create the first admin. Until then anyone can open the app and bills don't record who made them (the dashboard shows a reminder).
+- Admins add staff in Settings, then Accounts, then **Add a user**. Staff can bill, add customers, take payments against dues, add products and receive stock. Admins can do everything else.
+- Each person can change their own PIN (Settings, then My account). An admin can reset anyone's PIN, change roles, or deactivate someone.
+- **Forgot the admin PIN?** On the Pi (no login needed, ask the owner first and back up first):
+  ```bash
+  cd ~/retail-inventory-billing
+  npm run users -- list
+  npm run users -- reset-pin <username> <new-pin>
+  ```
+  Need a new admin? `npm run users -- create-admin <username> <pin> "Display Name"`.
 
 ## 9. Final report to the owner
 Summarize in a short list: Node version, app commit (`git rev-parse --short HEAD`), service status, the private HTTPS URL, backup schedule, and anything skipped or failing.
 
 ## Notes
-- **No login in the app yet.** Access is limited to devices on the owner's Tailscale network, which is the protection. The owner can ask for an optional PIN screen to be built later (a separate task, not part of this setup). Anyone on the owner's tailnet (or the shop Wi-Fi if the owner opens `http://<pi-ip>:3000`) can use the app.
+- **Turn on accounts** (section 8b). Until the first admin exists, anyone on the owner's tailnet (or the shop Wi-Fi via `http://<pi-ip>:3000`) can use the app. Tailscale keeps outsiders out; accounts decide what each person at the shop may do.
 - To restrict to Tailscale only, the owner can later block port 3000 on the LAN: `sudo apt install -y ufw && sudo ufw allow in on tailscale0 && sudo ufw allow ssh && sudo ufw deny 3000 && sudo ufw enable`. **Ask first**: a wrong firewall rule can lock out SSH.
 - Power: use the official 27W supply. An SSD is more reliable than a microSD card for the database.

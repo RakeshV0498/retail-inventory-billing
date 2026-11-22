@@ -7,8 +7,8 @@ import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-o
  */
 
 // Defined in lib/constants (no DB imports) and re-exported here; relative path because drizzle-kit loads this file.
-import { CATEGORIES, UNIT_TYPES } from "../lib/constants";
-export { CATEGORIES, UNIT_TYPES };
+import { CATEGORIES, ROLES, UNIT_TYPES } from "../lib/constants";
+export { CATEGORIES, ROLES, UNIT_TYPES };
 export const PAYMENT_MODES = ["cash", "upi", "card", "split", "credit"] as const;
 /** How a customer can settle dues (credit itself is not a way to pay). */
 export const DUES_PAYMENT_MODES = ["cash", "upi", "card"] as const;
@@ -71,6 +71,40 @@ export const batches = sqliteTable(
   ],
 );
 
+/** Staff and admins who log in. Usernames are lowercase; invoices keep a name snapshot so history survives renames/deactivation. */
+export const users = sqliteTable(
+  "users",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    username: text("username").notNull(),
+    displayName: text("display_name").notNull(),
+    pinHash: text("pin_hash").notNull(),
+    role: text("role", { enum: ROLES }).notNull().default("staff"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    /** Bumped on PIN reset / role change / deactivation: signs that user out everywhere. */
+    sessionVersion: integer("session_version").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("users_username_uq").on(t.username)],
+);
+
+/** Append-only record of sensitive actions (who did what, when). Never updated or deleted. */
+export const auditLog = sqliteTable(
+  "audit_log",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    at: createdAt(),
+    userId: integer("user_id"),
+    /** Name at the time; "(no accounts)" when accounts are not set up, "(command line)" for CLI changes. */
+    username: text("username").notNull().default(""),
+    action: text("action").notNull(),
+    entityType: text("entity_type").notNull(),
+    entityId: integer("entity_id"),
+    summary: text("summary").notNull(),
+  },
+  (t) => [index("audit_at_idx").on(t.at), index("audit_user_idx").on(t.userId)],
+);
+
 /** People who buy on credit (udhaar). Balances are computed from invoices and payments, never stored. */
 export const customers = sqliteTable(
   "customers",
@@ -98,6 +132,8 @@ export const payments = sqliteTable(
     amount: integer("amount").notNull(),
     mode: text("mode", { enum: DUES_PAYMENT_MODES }).notNull(),
     note: text("note"),
+    createdBy: integer("created_by").references(() => users.id),
+    createdByName: text("created_by_name"),
     createdAt: createdAt(),
   },
   (t) => [index("payments_customer_idx").on(t.customerId), index("payments_created_idx").on(t.createdAt), check("payments_amount_chk", sql`${t.amount} > 0`)],
@@ -122,6 +158,9 @@ export const invoices = sqliteTable(
     /** Part of the grand total owed by the customer (udhaar); 0 for fully paid bills. */
     creditAmount: integer("credit_amount").notNull().default(0),
     customerId: integer("customer_id").references(() => customers.id),
+    /** Who rang up the bill (null = before accounts existed / accounts not set up). */
+    createdBy: integer("created_by").references(() => users.id),
+    createdByName: text("created_by_name"),
     status: text("status", { enum: ["paid", "void"] }).notNull().default("paid"),
     createdAt: createdAt(),
   },
@@ -208,6 +247,8 @@ export type Batch = typeof batches.$inferSelect;
 export type NewBatch = typeof batches.$inferInsert;
 export type Invoice = typeof invoices.$inferSelect;
 export type Customer = typeof customers.$inferSelect;
+export type User = typeof users.$inferSelect;
+export type AuditEntry = typeof auditLog.$inferSelect;
 export type Payment = typeof payments.$inferSelect;
 export type InvoiceItem = typeof invoiceItems.$inferSelect;
 export type StockMovement = typeof stockMovements.$inferSelect;

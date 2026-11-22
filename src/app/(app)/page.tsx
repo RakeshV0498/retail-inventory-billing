@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { requireAuth } from "@/lib/session";
+import { getViewer, requireAuth } from "@/lib/session";
 import { getDb } from "@/db/client";
 import { todayISO } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
+import { isDemo } from "@/db/bootstrap";
 import { formatQty } from "@/lib/qty";
-import { ExpiryBadge } from "@/components/ui";
+import { ExpiryBadge, Notice } from "@/components/ui";
 import { getDashboardStats } from "@/services/dashboard";
 import { getExpiredBatches, getExpiringBatches, getLowStock } from "@/services/inventory";
 import { getSettings } from "@/services/settings";
@@ -23,8 +24,11 @@ function Stat({ label, value, sub, href, tone }: { label: string; value: string 
   return href ? <Link href={href}>{body}</Link> : body;
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
   await requireAuth();
+  const sp = await searchParams;
+  const viewer = await getViewer();
+  const showProfit = viewer.can("reports.view");
   const db = getDb();
   const now = new Date();
   const today = todayISO(now);
@@ -47,9 +51,16 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      {sp.denied && <Notice error="That needs an admin account. Ask an admin to do it." />}
+      {!viewer.accountsOn && !isDemo() && viewer.can("users.manage") && (
+        <Link href="/settings" className="block rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm font-medium text-amber-900">
+          Anyone can open this app and bills don&apos;t record who made them. Set up accounts (admin + staff) →
+        </Link>
+      )}
+
+      <div className={`grid grid-cols-2 gap-3 ${showProfit ? "md:grid-cols-5" : "md:grid-cols-4"}`}>
         <Stat label="Today's sales" value={formatPaise(stats.todaySales)} sub={`${stats.todayInvoices} invoice(s)`} />
-        <Stat label="Profit (estimate)" value={formatPaise(stats.profitEstimate)} sub="Excl. GST, vs purchase price" />
+        {showProfit && <Stat label="Profit (estimate)" value={formatPaise(stats.profitEstimate)} sub="Excl. GST, vs purchase price" />}
         <Stat label="Low stock" value={stats.lowStockCount} href="/inventory?tab=low" tone={stats.lowStockCount ? "warn" : undefined} />
         <Stat label={`Expiring ≤ ${settings.expiryWarnDays}d`} value={stats.expiringSoonCount} href="/inventory?tab=expiring" tone={stats.expiringSoonCount ? "warn" : undefined} />
         <div className="col-span-2 md:col-span-1">

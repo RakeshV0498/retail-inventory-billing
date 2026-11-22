@@ -1,11 +1,11 @@
 import { ProductForm } from "@/components/inventory/ProductForm";
 import { Notice } from "@/components/ui";
-import { requireAuth } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function NewProductPage({ searchParams }: { searchParams: Promise<{ error?: string; barcode?: string }> }) {
-  await requireAuth();
+  await requirePermission("product.create");
   const { error, barcode } = await searchParams;
   return (
     <div className="mx-auto max-w-2xl">

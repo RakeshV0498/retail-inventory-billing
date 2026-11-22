@@ -17,6 +17,7 @@ Do not add dependencies without a clear justification.
 | `npm run build` / `npm start` | Production build / serve on `0.0.0.0` |
 | `npm run db:push` (= `db:migrate`) | Apply the committed SQL migrations (`drizzle/*.sql`) to `data/app.db`: creates a new DB or upgrades an existing one, non-interactive |
 | `npm run db:generate` | After editing `src/db/schema.ts`: generate a new migration file (commit it) |
+| `npm run users -- <cmd>` | Offline account recovery: `list`, `create-admin`, `reset-pin`, `activate` |
 | `npm run db:seed` | Load sample grocery + pharmacy data (`-- --reset` wipes first) |
 | `npm test` | Vitest (in-memory SQLite) |
 | `npm run typecheck` | `tsc --noEmit` |
@@ -36,13 +37,19 @@ DB file: `data/app.db` (gitignored; override with `DATABASE_PATH`). Backup = cop
    must never be sold — re-validate inside the billing transaction, not just in the UI.
 6. Invoice items snapshot name, price, GST rate and purchase price; later edits to products must not change old invoices.
 
-## PIN login (optional)
-Off by default; set in Settings (4-12 digits, scrypt-hashed in the `settings` table, no extra deps).
-- **Every page, server action and route handler must call `await requireAuth()` first** (`src/lib/session.ts`).
-  Layouts alone are not enough: they don't re-render on client navigation and actions can be invoked directly.
-- `isAuthed()` must read `cookies()` *before* any early return, otherwise a build made with no PIN prerenders pages as static HTML.
-- 5 wrong PINs lock logins for 60 s (global, in-memory). Changing/removing the PIN rotates the session secret (signs everyone out).
-- Disabled in demo mode. Never log or return `pinHash` / `sessionSecret`.
+## Accounts, roles and permissions
+Optional until the first admin exists (open mode = everything allowed, actor recorded as null). Then every user signs in with **username + PIN** (4-12 digits, scrypt).
+- Roles: `admin` (everything) and `staff` (bill, add customers, take dues payments, add products, receive stock). The matrix is ONE table: `src/lib/permissions.ts` (`can(role, permission)`); `tests/permissions.test.ts` pins it.
+- **Every page, server action and route handler must start with `await requireAuth()` or `await requirePermission("<perm>")`** (`src/lib/session.ts`). Layouts alone are not enough (not re-rendered on client navigation; actions can be invoked directly).
+  Hiding a button is cosmetic only. `tests/security.test.ts` makes every server action declare its exact permission, so adding an action forces a decision.
+- `isAuthed()`/`getCurrentUser()` must read `cookies()` *before* any early return, otherwise a build made with no accounts prerenders pages as static HTML.
+- Session cookie = `userId.version.expiry.hmac`. A user's `session_version` is bumped on PIN reset/change, role change and deactivation (signs out only that user). Lockout is **per username** (5 wrong -> 60 s, in memory) and unknown usernames look identical.
+- Safety rules: never zero active admins (`LAST_ADMIN`); users are only deactivated, never deleted (invoices reference them); usernames are unique, lowercase, and not renamed.
+- `writeAudit(tx, actor, ...)` goes **inside the same transaction** as the change; `audit_log` is append-only. Pass `getActor()` into services that create records (`createInvoice`, `recordPayment`).
+- Invoices/payments store `created_by` + a **name snapshot** (`created_by_name`) so history survives renames and deactivation.
+- Recovery without a login: `npm run users -- list | create-admin <username> <pin> [name] | reset-pin <username> <pin> | activate <username>` (run on the machine holding the DB).
+- The old single shared PIN is converted to user `admin` (same PIN) inside `runMigrations`. Demo mode: accounts disabled.
+- Never log or return `pinHash` / `sessionSecret`.
 
 ## Database changes (migrations)
 - **Never run `drizzle-kit push` against a real database.** It treats `default 0` as "no default" and demands an interactive data-loss confirmation (it failed on a populated DB).
@@ -62,7 +69,7 @@ Off by default; set in Settings (4-12 digits, scrypt-hashed in the `settings` ta
   `@esbuild-kit/core-utils -> esbuild ^0.25.12` (drizzle-kit's bundled old esbuild). Versions in use: drizzle-orm 0.45.x, zod 4.x, vitest 5.x, Next 15.5.x. Next 16 is a deliberate, separate future migration.
 - Every zod boundary has caps (names/SKU/barcode lengths, prices <= ₹1 crore, quantities <= 1M units, <= 200 cart lines). New inputs need caps too.
 - All responses carry security headers (`SECURITY_HEADERS` in `next.config.ts`; no strict script CSP on purpose).
-- `tests/security.test.ts` fails if a page, route handler or server action lacks `requireAuth()`, if `"use server"` appears outside `actions.ts`, or if a client component imports the DB layer.
+- `tests/security.test.ts` fails if a page, route handler or server action lacks its guard (`requireAuth`/`requirePermission`), if an action isn't classified with its permission, if `"use server"` appears outside `actions.ts`, or if a client component imports the DB layer.
 
 ## Barcode capture & online lookup
 Add-product form (`ProductForm`): scan (camera), type, or USB scanner + Enter; then `lookupBarcode` (`src/services/productLookup.ts`).
@@ -86,7 +93,7 @@ Add-product form (`ProductForm`): scan (camera), type, or USB scanner + Enter; t
 - Irreversible UI actions use `ConfirmSubmit`; every new action calls `requireAuth()` first.
 
 ## Reports & CSV export
-`src/services/reports.ts` (`getSalesReport`, `buildCsv`), UI at `/reports`, downloads at `/reports/export` (calls `requireAuth()`).
+`src/services/reports.ts` (`getSalesReport`, `buildCsv`), UI at `/reports`, downloads at `/reports/export` (needs `reports.view`).
 - Paid invoices only (void excluded); ranges are **local calendar days, inclusive**, so the server timezone matters.
 - CGST/SGST are computed per slab and summed (`getSalesReport`), so GST rows always reconcile with totals.
 - CSV via `src/lib/csv.ts`: money cells use `num(paiseToDecimal(x))` (integer math, never floats); text cells get the

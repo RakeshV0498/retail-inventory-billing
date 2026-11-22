@@ -15,6 +15,13 @@
       "when": 1795323708680,
       "tag": "0001_credit",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1795325721480,
+      "tag": "0002_accounts",
+      "breakpoints": true
     }
   ]
 }

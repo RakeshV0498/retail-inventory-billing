@@ -26,17 +26,35 @@ export function verifyPin(pin: string, stored: string): boolean {
 
 const sign = (secret: string, payload: string) => createHmac("sha256", secret).update(payload).digest("hex");
 
-/** Session token: `<expiresAtMs>.<hmac>`. */
-export function signSession(secret: string, expiresAtMs: number): string {
-  const payload = String(expiresAtMs);
+/** Lowercase `[a-z0-9._-]`, 3-30 chars; otherwise null. */
+export function normalizeUsername(raw: string): string | null {
+  const u = raw.trim().toLowerCase();
+  return /^[a-z0-9._-]{3,30}$/.test(u) ? u : null;
+}
+
+export interface SessionClaims {
+  userId: number;
+  /** users.session_version at the time of login; a mismatch later means "signed out". */
+  version: number;
+  expiresAt: number;
+}
+
+/** Token: `<userId>.<version>.<expiresAtMs>.<hmac>`. */
+export function signSessionToken(secret: string, claims: SessionClaims): string {
+  const payload = `${claims.userId}.${claims.version}.${claims.expiresAt}`;
   return `${payload}.${sign(secret, payload)}`;
 }
 
-export function verifySession(secret: string, token: string, nowMs: number): boolean {
-  const [payload, sig, ...rest] = token.split(".");
-  if (!payload || !sig || rest.length > 0 || !/^\d+$/.test(payload)) return false;
-  const expected = Buffer.from(sign(secret, payload), "hex");
+/** Returns the claims if the signature is valid and the token has not expired, otherwise null. */
+export function verifySessionToken(secret: string, token: string, nowMs: number): SessionClaims | null {
+  const parts = token.split(".");
+  if (parts.length !== 4) return null;
+  const [uid, ver, exp, sig] = parts as [string, string, string, string];
+  if (![uid, ver, exp].every((p) => /^\d+$/.test(p)) || !/^[0-9a-f]+$/.test(sig)) return null;
+  const expected = Buffer.from(sign(secret, `${uid}.${ver}.${exp}`), "hex");
   const given = Buffer.from(sig, "hex");
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return false;
-  return Number(payload) > nowMs;
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
+  const expiresAt = Number(exp);
+  if (expiresAt <= nowMs) return null;
+  return { userId: Number(uid), version: Number(ver), expiresAt };
 }

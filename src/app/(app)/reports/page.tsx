@@ -3,7 +3,7 @@ import { getDb } from "@/db/client";
 import { addDaysISO, firstOfMonthISO, lastMonthRange, todayISO } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
 import { formatQty } from "@/lib/qty";
-import { requireAuth } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
 import { getSalesReport } from "@/services/reports";
 import { parseRange } from "./range";
 
@@ -21,7 +21,7 @@ function Card({ label, value, sub }: { label: string; value: string; sub?: strin
 }
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ from?: string; to?: string }> }) {
-  await requireAuth();
+  await requirePermission("reports.view");
   const sp = await searchParams;
   const { from, to } = parseRange(sp.from, sp.to);
   const today = todayISO();
@@ -102,6 +102,25 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           </table>
         </section>
       </div>
+
+      <section className="card overflow-x-auto">
+        <h2 className="mb-2 font-semibold">Sales by user</h2>
+        <table className="w-full text-sm">
+          <thead><tr><th className="th px-0">Billed by</th><th className="th text-right">Invoices</th><th className="th text-right">Net sales</th></tr></thead>
+          <tbody className="divide-y divide-slate-100">
+            {r.byUser.map((u) => (
+              <tr key={u.userId ?? "none"}>
+                <td className="py-1">
+                  <Link href={`/invoices?user=${u.userId ?? "none"}&from=${from}&to=${to}`} className="hover:underline">{u.name}</Link>
+                </td>
+                <td className="text-right">{u.invoices}</td>
+                <td className="text-right">{formatPaise(u.netSales)}</td>
+              </tr>
+            ))}
+            {r.byUser.length === 0 && <tr><td className="py-2 text-slate-500" colSpan={3}>No sales in this range.</td></tr>}
+          </tbody>
+        </table>
+      </section>
 
       <div className="grid gap-3 md:grid-cols-2">
         <section className="card overflow-x-auto">

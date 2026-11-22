@@ -3,30 +3,39 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { logoutAction } from "@/app/actions";
+import { can, type Permission, type Role } from "@/lib/permissions";
 
-const LINKS = [
+interface NavLink {
+  href: string;
+  label: string;
+  icon: string;
+  needs?: Permission;
+}
+
+const LINKS: NavLink[] = [
   { href: "/", label: "Dashboard", icon: "▦" },
   { href: "/pos", label: "POS", icon: "₹" },
   { href: "/inventory", label: "Inventory", icon: "▤" },
   { href: "/invoices", label: "Invoices", icon: "🧾" },
-  { href: "/reports", label: "Reports", icon: "📊" },
+  { href: "/reports", label: "Reports", icon: "📊", needs: "reports.view" },
   { href: "/customers", label: "Customers", icon: "👥" },
   { href: "/settings", label: "Settings", icon: "⚙" },
-] as const;
+];
 
 function isActive(path: string, href: string) {
   return href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`);
 }
 
-export function Nav() {
+export function Nav({ user }: { user: { name: string; role: Role } | null }) {
   const path = usePathname();
+  const links = LINKS.filter((l) => !l.needs || can(user?.role ?? null, l.needs));
   return (
     <>
       {/* Desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-20 hidden w-56 flex-col border-r border-slate-200 bg-white p-3 md:flex print:hidden">
         <div className="mb-4 px-2 pt-2 text-lg font-bold text-emerald-800">Retail Billing</div>
         <nav className="flex flex-col gap-1">
-          {LINKS.map((l) => (
+          {links.map((l) => (
             <Link
               key={l.href}
               href={l.href}
@@ -39,13 +48,19 @@ export function Nav() {
             </Link>
           ))}
         </nav>
-        <form action={logoutAction} className="mt-auto px-1"><button className="btn-secondary w-full text-sm">Log out</button></form>
+        {user && (
+          <p className="mt-auto px-2 text-sm text-slate-700">
+            <span className="block truncate font-medium">{user.name}</span>
+            <span className="text-xs capitalize text-slate-500">{user.role}</span>
+          </p>
+        )}
+        <form action={logoutAction} className={`${user ? "mt-2" : "mt-auto"} px-1`}><button className="btn-secondary w-full text-sm">Log out</button></form>
         <p className="mt-2 px-2 text-xs text-slate-500">F2 search · Enter add · F9 pay · Ctrl+P print</p>
       </aside>
 
       {/* Mobile bottom bar */}
       <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden print:hidden">
-        {LINKS.slice(0, 5).map((l) => (
+        {links.slice(0, 5).map((l) => (
           <Link
             key={l.href}
             href={l.href}

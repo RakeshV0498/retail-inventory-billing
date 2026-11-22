@@ -4,7 +4,7 @@ import { getDb } from "@/db/client";
 import { ProductForm } from "@/components/inventory/ProductForm";
 import { Notice } from "@/components/ui";
 import { formatQty } from "@/lib/qty";
-import { requireAuth } from "@/lib/session";
+import { requirePermission } from "@/lib/session";
 import { getProduct } from "@/services/inventory";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,7 @@ export default async function EditProductPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string }>;
 }) {
-  await requireAuth();
+  await requirePermission("product.edit");
   const { id } = await params;
   const { error } = await searchParams;
   const product = getProduct(getDb(), Number(id));

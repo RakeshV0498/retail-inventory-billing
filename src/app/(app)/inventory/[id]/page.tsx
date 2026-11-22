@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { requireAuth } from "@/lib/session";
+import { getViewer, requireAuth } from "@/lib/session";
 import { notFound } from "next/navigation";
 import { getDb } from "@/db/client";
 import { isExpired, todayISO } from "@/lib/dates";
@@ -30,7 +30,13 @@ export default async function ProductPage({
   const showEmpty = sp.empty === "1";
   const batches = showEmpty ? allBatches : allBatches.filter((b) => b.quantityAvailable > 0);
   const emptyCount = allBatches.length - allBatches.filter((b) => b.quantityAvailable > 0).length;
-  const canDelete = !productHasHistory(db, product.id);
+  const viewer = await getViewer();
+  const canDelete = viewer.can("product.delete") && !productHasHistory(db, product.id);
+  const mayEditProduct = viewer.can("product.edit");
+  const mayEditBatch = viewer.can("batch.edit");
+  const mayWriteOff = viewer.can("stock.writeoff");
+  const mayReceive = viewer.can("stock.receive");
+  const mayArchive = viewer.can("product.archive");
   const archived = !product.isActive;
   const decimal = product.allowDecimalQty;
 
@@ -40,7 +46,7 @@ export default async function ProductPage({
         <Link href="/inventory" className="text-sm text-emerald-800 hover:underline">← Inventory</Link>
         <div className="flex items-start justify-between gap-3">
           <h1 className="text-xl font-bold md:text-2xl">{product.name}</h1>
-          <Link href={`/inventory/${product.id}/edit`} className="btn-secondary min-h-10 shrink-0 px-3 text-sm">Edit product</Link>
+          {mayEditProduct && <Link href={`/inventory/${product.id}/edit`} className="btn-secondary min-h-10 shrink-0 px-3 text-sm">Edit product</Link>}
         </div>
         <p className="text-sm text-slate-600">
           {product.sku} · {product.category} · per {product.unitType} · GST {product.gstRate}%
@@ -51,10 +57,12 @@ export default async function ProductPage({
       {archived && (
         <div className="card flex flex-wrap items-center justify-between gap-3 border-amber-300 bg-amber-50">
           <p className="text-sm text-amber-900">This product is archived: hidden from POS, search and lists. Old invoices are unaffected.</p>
-          <form action={restoreProductAction}>
-            <input type="hidden" name="productId" value={product.id} />
-            <button className="btn-primary">Restore product</button>
-          </form>
+          {mayArchive && (
+            <form action={restoreProductAction}>
+              <input type="hidden" name="productId" value={product.id} />
+              <button className="btn-primary">Restore product</button>
+            </form>
+          )}
         </div>
       )}
 
@@ -70,8 +78,8 @@ export default async function ProductPage({
               <tr key={b.id} className={isExpired(b.expiryDate, today) ? "bg-red-50" : ""}>
                 <td className="td font-medium">
                   {b.batchNumber}
-                  <Link href={`/inventory/${product.id}/batches/${b.id}`} className="ml-2 text-xs font-normal text-emerald-800 hover:underline">Edit</Link>
-                  {isExpired(b.expiryDate, today) && b.quantityAvailable > 0 && (
+                  {mayEditBatch && <Link href={`/inventory/${product.id}/batches/${b.id}`} className="ml-2 text-xs font-normal text-emerald-800 hover:underline">Edit</Link>}
+                  {mayWriteOff && isExpired(b.expiryDate, today) && b.quantityAvailable > 0 && (
                     <form action={writeOffAction} className="mt-1 md:hidden">
                       <input type="hidden" name="batchId" value={b.id} />
                       <input type="hidden" name="productId" value={product.id} />
@@ -85,7 +93,7 @@ export default async function ProductPage({
                 <td className="td text-right">{formatPaise(b.mrp)}</td>
                 <td className="td text-right">{formatPaise(b.sellingPrice)}</td>
                 <td className="td hidden text-right md:table-cell">
-                  {isExpired(b.expiryDate, today) && b.quantityAvailable > 0 && (
+                  {mayWriteOff && isExpired(b.expiryDate, today) && b.quantityAvailable > 0 && (
                     <form action={writeOffAction}>
                       <input type="hidden" name="batchId" value={b.id} />
                       <input type="hidden" name="productId" value={product.id} />
@@ -107,7 +115,7 @@ export default async function ProductPage({
         )}
       </section>
 
-      {!archived && (
+      {!archived && mayReceive && (
       <section className="card">
         <h2 className="mb-3 font-semibold">Add stock batch</h2>
         <form action={addBatchAction} className="grid gap-3 md:grid-cols-3">
@@ -126,10 +134,11 @@ export default async function ProductPage({
       </section>
       )}
 
+      {(mayArchive || canDelete) && (
       <section className="card space-y-3">
         <h2 className="font-semibold">Manage product</h2>
         <div className="flex flex-wrap gap-2">
-          {!archived && (
+          {!archived && mayArchive && (
             <form action={archiveProductAction}>
               <input type="hidden" name="productId" value={product.id} />
               <ConfirmSubmit className="btn-secondary" message={`Archive ${product.name}? It will disappear from POS, search and lists (history is kept). Any expired stock is written off. You can restore it later.`}>
@@ -150,6 +159,7 @@ export default async function ProductPage({
             : "Products with stock or sales history can only be archived, so old invoices and reports stay correct."}
         </p>
       </section>
+      )}
     </div>
   );
 }
