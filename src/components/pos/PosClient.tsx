@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { barcodeLookupAction, checkoutAction, searchProductsAction } from "@/app/actions";
 import { BarcodeScannerModal } from "@/components/scanner/BarcodeScannerModal";
@@ -59,6 +60,7 @@ export function PosClient() {
   const [payMode, setPayMode] = useState<PayMode>("cash");
   const [split, setSplit] = useState({ cash: "", upi: "", card: "" });
   const [customer, setCustomer] = useState({ name: "", phone: "" });
+  const [missing, setMissing] = useState<string | null>(null); // scanned barcode we have no product for
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [paying, startPay] = useTransition();
   const today = todayISO();
@@ -115,7 +117,11 @@ export function PosClient() {
       setScanning(false);
       setQuery("");
       const p = await barcodeLookupAction(code);
-      if (!p) return flash("err", `No product with barcode ${code}`);
+      if (!p) {
+        setMissing(code);
+        return flash("err", `No product with barcode ${code}`);
+      }
+      setMissing(null);
       addProduct(p);
       flash("ok", `Added ${p.name}`);
     },
@@ -251,6 +257,16 @@ export function PosClient() {
             </ul>
           )}
         </div>
+
+        {missing && (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm">
+            <span className="text-amber-900">Barcode <strong>{missing}</strong> isn&apos;t in your inventory.</span>
+            <span className="flex gap-2">
+              <Link href={`/inventory/new?barcode=${encodeURIComponent(missing)}`} className="btn-primary min-h-10 px-3">Add it as a new product</Link>
+              <button type="button" onClick={() => setMissing(null)} className="btn-secondary min-h-10 px-3" aria-label="Dismiss">✕</button>
+            </span>
+          </div>
+        )}
 
         {toast && (
           <p role="status" className={`rounded-lg p-3 text-sm ${toast.kind === "ok" ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-800"}`}>{toast.text}</p>

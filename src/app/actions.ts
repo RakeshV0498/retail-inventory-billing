@@ -20,6 +20,7 @@ import {
   writeOffExpired,
   type ProductStock,
 } from "@/services/inventory";
+import { lookupBarcode, type LookupResult } from "@/services/productLookup";
 import { saveSettings } from "@/services/settings";
 import { checkPin, isPinEnabled, removePin, setPin } from "@/services/auth";
 import { endSession, requireAuth, startSession } from "@/lib/session";
@@ -56,6 +57,12 @@ export async function checkoutAction(input: InvoiceInput): Promise<CheckoutResul
   } catch (e) {
     return { ok: false, error: errMsg(e) };
   }
+}
+
+/** Look a scanned/typed barcode up in the shop's own inventory, then online (Open Food Facts family). */
+export async function lookupBarcodeAction(code: string): Promise<LookupResult> {
+  await requireAuth();
+  return lookupBarcode(getDb(), String(code).slice(0, 40));
 }
 
 /* ---------- Inventory ---------- */

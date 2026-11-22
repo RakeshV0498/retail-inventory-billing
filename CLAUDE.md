@@ -43,6 +43,14 @@ Off by default; set in Settings (4-12 digits, scrypt-hashed in the `settings` ta
 - 5 wrong PINs lock logins for 60 s (global, in-memory). Changing/removing the PIN rotates the session secret (signs everyone out).
 - Disabled in demo mode. Never log or return `pinHash` / `sessionSecret`.
 
+## Barcode capture & online lookup
+Add-product form (`ProductForm`): scan (camera), type, or USB scanner + Enter; then `lookupBarcode` (`src/services/productLookup.ts`).
+- Looks at the shop's own products first (active **and archived**), then Open Food Facts / Beauty Facts / Products Facts. Results only **prefill**; nothing is saved automatically.
+- Only the barcode digits are sent (`normalizeBarcode` rejects anything else, hosts are a fixed list: no SSRF); generic User-Agent, never add personal details.
+- Needs outbound HTTPS on the Pi; failure degrades to manual entry. `PRODUCT_LOOKUP_BASE` overrides the sources (tests, mirrors).
+- Client components must not import `@/db/schema`; shared enums live in `src/lib/constants.ts`.
+- Medicines are mostly absent from free databases, so manual entry is normal there; the barcode is remembered locally after the first save.
+
 ## Expired stock, archive and delete
 - Write-off (`writeOffBatch`, `writeOffExpired`) goes through `writeOffInTx`: batch update + `expired_wastage` movement in one transaction.
 - Written-off (qty 0) batches are hidden by default (`getProductBatches`); the ledger is never deleted.

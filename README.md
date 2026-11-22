@@ -27,6 +27,7 @@ For real use, self-host on a PC / Raspberry Pi (see Quick start).
 ## Features
 - Products with batches, MFG/expiry, MRP/selling/purchase price, GST slabs (0/5/12/18), loose (decimal) quantities
 - Low-stock and near-expiry (30/60 day) alerts; write off expired stock (one batch or all at once, with cost lost), archive/restore products, delete mistakes
+- Add product: scan the barcode (camera or USB scanner), look it up online (Open Food Facts, free, no key), pick a match to prefill, finish by hand. Items already in your inventory are detected
 - POS: instant search, camera + USB scan, **FEFO** batch allocation, expired batches blocked, live GST, item discounts,
   optional per-batch near-expiry auto-markdown, cash/UPI/card/split
 - Printable invoices: 58mm, 80mm thermal and A4 (`Ctrl+P`)
@@ -34,6 +35,11 @@ For real use, self-host on a PC / Raspberry Pi (see Quick start).
 - Dashboard: today's sales, profit estimate, low stock, expiring soon
 - Optional PIN login (Settings → PIN protection), 30-day sessions, lockout after 5 wrong tries
 - Shortcuts (desktop): `F2` search · `Enter` add · `F9` pay · `Ctrl+P` print
+
+## Barcode lookup (online)
+Add-product looks the barcode up on Open Food Facts, Open Beauty Facts and Open Products Facts (free, open, no account).
+Only the barcode number is sent. The device needs internet access; without it you simply type the details.
+Coverage is good for packaged groceries, poor for medicines. Your own database remembers every barcode you save.
 
 ## Develop
 `npm test` · `npm run typecheck` · `npm run lint`. See `CLAUDE.md` for conventions

@@ -120,6 +120,11 @@ sqlite3 ~/retail-inventory-billing/data/app.db ".backup $HOME/backups/app-test.d
 ```
 Remind the owner to copy `~/backups` off the Pi occasionally (USB stick or PC). A backup on the same SD card does not survive card failure.
 
+## 7b. Online barcode lookup (needs internet on the Pi)
+Add product → scan a barcode → the app asks `world.openfoodfacts.org` (and its Beauty/Products sister sites) for the name. It sends only the
+barcode number. Check once from the Pi: `curl -s -o /dev/null -w "%{http_code}\n" https://world.openfoodfacts.org/api/v2/product/3017620422003.json`
+should print `200`. If the Pi has no internet, the form still works: you just type the details.
+
 ## 8. Updating later
 ```bash
 cd ~/retail-inventory-billing

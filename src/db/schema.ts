@@ -6,8 +6,9 @@ import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-o
  * dates = ISO `YYYY-MM-DD`, timestamps = ISO strings. GST prices are inclusive.
  */
 
-export const CATEGORIES = ["grocery", "medical", "general"] as const;
-export const UNIT_TYPES = ["pcs", "kg", "g", "strip", "bottle"] as const;
+// Defined in lib/constants (no DB imports) and re-exported here; relative path because drizzle-kit loads this file.
+import { CATEGORIES, UNIT_TYPES } from "../lib/constants";
+export { CATEGORIES, UNIT_TYPES };
 export const PAYMENT_MODES = ["cash", "upi", "card", "split"] as const;
 export const MOVEMENT_TYPES = ["purchase_in", "sale_out", "return", "expired_wastage"] as const;
 export const DISCOUNT_TYPES = ["none", "percent", "flat"] as const;
