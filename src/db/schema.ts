@@ -9,7 +9,9 @@ import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-o
 // Defined in lib/constants (no DB imports) and re-exported here; relative path because drizzle-kit loads this file.
 import { CATEGORIES, UNIT_TYPES } from "../lib/constants";
 export { CATEGORIES, UNIT_TYPES };
-export const PAYMENT_MODES = ["cash", "upi", "card", "split"] as const;
+export const PAYMENT_MODES = ["cash", "upi", "card", "split", "credit"] as const;
+/** How a customer can settle dues (credit itself is not a way to pay). */
+export const DUES_PAYMENT_MODES = ["cash", "upi", "card"] as const;
 export const MOVEMENT_TYPES = ["purchase_in", "sale_out", "return", "expired_wastage", "adjustment"] as const;
 export const DISCOUNT_TYPES = ["none", "percent", "flat"] as const;
 
@@ -69,6 +71,38 @@ export const batches = sqliteTable(
   ],
 );
 
+/** People who buy on credit (udhaar). Balances are computed from invoices and payments, never stored. */
+export const customers = sqliteTable(
+  "customers",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    /** digits only; unique when present */
+    phone: text("phone"),
+    notes: text("notes"),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("customers_phone_uq").on(t.phone), index("customers_name_idx").on(t.name)],
+);
+
+/** Money received from a customer against their dues. */
+export const payments = sqliteTable(
+  "payments",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    customerId: integer("customer_id")
+      .notNull()
+      .references(() => customers.id),
+    /** paise, always positive */
+    amount: integer("amount").notNull(),
+    mode: text("mode", { enum: DUES_PAYMENT_MODES }).notNull(),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("payments_customer_idx").on(t.customerId), index("payments_created_idx").on(t.createdAt), check("payments_amount_chk", sql`${t.amount} > 0`)],
+);
+
 export const invoices = sqliteTable(
   "invoices",
   {
@@ -85,10 +119,17 @@ export const invoices = sqliteTable(
     cashAmount: integer("cash_amount").notNull().default(0),
     upiAmount: integer("upi_amount").notNull().default(0),
     cardAmount: integer("card_amount").notNull().default(0),
+    /** Part of the grand total owed by the customer (udhaar); 0 for fully paid bills. */
+    creditAmount: integer("credit_amount").notNull().default(0),
+    customerId: integer("customer_id").references(() => customers.id),
     status: text("status", { enum: ["paid", "void"] }).notNull().default("paid"),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("invoices_number_uq").on(t.invoiceNumber), index("invoices_created_idx").on(t.createdAt)],
+  (t) => [
+    uniqueIndex("invoices_number_uq").on(t.invoiceNumber),
+    index("invoices_created_idx").on(t.createdAt),
+    index("invoices_customer_idx").on(t.customerId),
+  ],
 );
 
 export const invoiceItems = sqliteTable(
@@ -166,6 +207,8 @@ export type NewProduct = typeof products.$inferInsert;
 export type Batch = typeof batches.$inferSelect;
 export type NewBatch = typeof batches.$inferInsert;
 export type Invoice = typeof invoices.$inferSelect;
+export type Customer = typeof customers.$inferSelect;
+export type Payment = typeof payments.$inferSelect;
 export type InvoiceItem = typeof invoiceItems.$inferSelect;
 export type StockMovement = typeof stockMovements.$inferSelect;
 export type PricingRule = typeof pricingRules.$inferSelect;

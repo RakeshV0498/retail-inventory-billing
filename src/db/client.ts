@@ -5,7 +5,8 @@ import path from "node:path";
 import { ensureDemoDb } from "./bootstrap";
 import * as schema from "./schema";
 
-export type Db = BetterSQLite3Database<typeof schema>;
+/** The drizzle handle plus the underlying connection (needed by the migration runner). */
+export type Db = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
 
 /** Wrap an open better-sqlite3 connection (used by the app and by tests with ':memory:'). */
 export function createDb(sqlite: Database.Database): Db {

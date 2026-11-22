@@ -24,6 +24,13 @@ import {
   type ProductStock,
 } from "@/services/inventory";
 import { lookupBarcode, type LookupResult } from "@/services/productLookup";
+import {
+  createCustomer,
+  recordPayment,
+  searchCustomers,
+  updateCustomer,
+  type CustomerWithBalance,
+} from "@/services/customers";
 import { saveSettings } from "@/services/settings";
 import { checkPin, isPinEnabled, removePin, setPin } from "@/services/auth";
 import { endSession, requireAuth, startSession } from "@/lib/session";
@@ -67,6 +74,71 @@ export async function lookupBarcodeAction(code: string, excludeProductId?: numbe
   await requireAuth();
   const exclude = Number.isInteger(excludeProductId) ? excludeProductId : undefined;
   return lookupBarcode(getDb(), String(code).slice(0, 40), { excludeProductId: exclude });
+}
+
+/* ---------- Customers & credit ---------- */
+
+export async function searchCustomersAction(q: string): Promise<CustomerWithBalance[]> {
+  await requireAuth();
+  return searchCustomers(getDb(), String(q).slice(0, 60));
+}
+
+/** Add a customer from the POS without leaving the bill. */
+export async function createCustomerInlineAction(
+  name: string,
+  phone: string,
+): Promise<{ ok: true; customer: { id: number; name: string; phone: string | null } } | { ok: false; error: string }> {
+  await requireAuth();
+  try {
+    const c = createCustomer(getDb(), { name: String(name).slice(0, 100), phone: String(phone).slice(0, 30) });
+    return { ok: true, customer: { id: c.id, name: c.name, phone: c.phone } };
+  } catch (e) {
+    return { ok: false, error: errMsg(e) };
+  }
+}
+
+export async function createCustomerAction(form: FormData) {
+  await requireAuth();
+  let id = 0;
+  let error: string | null = null;
+  try {
+    id = createCustomer(getDb(), { name: str(form, "name"), phone: optStr(form, "phone"), notes: optStr(form, "notes") }).id;
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/customers?error=${encodeURIComponent(error)}`);
+  revalidatePath("/customers");
+  redirect(`/customers/${id}?ok=1`);
+}
+
+export async function updateCustomerAction(form: FormData) {
+  await requireAuth();
+  const id = Number(str(form, "customerId"));
+  let error: string | null = null;
+  try {
+    updateCustomer(getDb(), id, { name: str(form, "name"), phone: optStr(form, "phone"), notes: optStr(form, "notes") });
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/customers/${id}?error=${encodeURIComponent(error)}`);
+  revalidatePath("/customers");
+  redirect(`/customers/${id}?ok=1`);
+}
+
+export async function recordPaymentAction(form: FormData) {
+  await requireAuth();
+  const id = Number(str(form, "customerId"));
+  let error: string | null = null;
+  try {
+    const mode = str(form, "mode");
+    if (mode !== "cash" && mode !== "upi" && mode !== "card") throw new Error("Choose how it was paid");
+    recordPayment(getDb(), id, rupeesToPaise(str(form, "amount")), mode, optStr(form, "note"));
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/customers/${id}?error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect(`/customers/${id}?ok=1`);
 }
 
 /* ---------- Inventory ---------- */

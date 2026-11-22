@@ -107,9 +107,14 @@ export default async function InvoicePage({
             <span>TOTAL</span><span>{formatPaise(invoice.grandTotal)}</span>
           </div>
           <p className="pt-1 uppercase">
-            Paid: {invoice.paymentMode}
-            {invoice.paymentMode === "split" && ` (cash ${formatPaise(invoice.cashAmount)}, upi ${formatPaise(invoice.upiAmount)}, card ${formatPaise(invoice.cardAmount)})`}
+            {invoice.paymentMode === "credit" ? "On credit" : `Paid: ${invoice.paymentMode}`}
+            {invoice.paymentMode === "split" && ` (cash ${formatPaise(invoice.cashAmount)}, upi ${formatPaise(invoice.upiAmount)}, card ${formatPaise(invoice.cardAmount)}, credit ${formatPaise(invoice.creditAmount)})`}
           </p>
+          {invoice.creditAmount > 0 && (
+            <p className="font-semibold">
+              Balance on credit: {formatPaise(invoice.creditAmount)}{invoice.customerName ? ` (${invoice.customerName})` : ""}
+            </p>
+          )}
         </div>
         {s.receiptFooter && <p className="mt-3 text-center">{s.receiptFooter}</p>}
       </article>

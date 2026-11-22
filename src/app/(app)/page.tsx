@@ -47,11 +47,14 @@ export default async function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Stat label="Today's sales" value={formatPaise(stats.todaySales)} sub={`${stats.todayInvoices} invoice(s)`} />
         <Stat label="Profit (estimate)" value={formatPaise(stats.profitEstimate)} sub="Excl. GST, vs purchase price" />
         <Stat label="Low stock" value={stats.lowStockCount} href="/inventory?tab=low" tone={stats.lowStockCount ? "warn" : undefined} />
         <Stat label={`Expiring ≤ ${settings.expiryWarnDays}d`} value={stats.expiringSoonCount} href="/inventory?tab=expiring" tone={stats.expiringSoonCount ? "warn" : undefined} />
+        <div className="col-span-2 md:col-span-1">
+          <Stat label="Customer dues" value={formatPaise(stats.outstandingDues)} sub="Owed to you (udhaar)" href="/customers" tone={stats.outstandingDues ? "bad" : undefined} />
+        </div>
       </div>
 
       {expired.length > 0 && (

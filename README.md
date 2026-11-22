@@ -6,7 +6,7 @@ Mobile-first PWA + desktop, single portable SQLite file, no cloud services.
 ## Quick start
 ```bash
 npm install
-npm run db:push      # create data/app.db
+npm run db:push      # create/upgrade data/app.db (applies the SQL migrations; safe on existing data)
 npm run db:seed      # sample grocery + pharmacy data (-- --reset to wipe first)
 npm run dev          # http://<your-pc-ip>:3000 — open from your phone on the same Wi-Fi
 ```
@@ -32,6 +32,7 @@ For real use, self-host on a PC / Raspberry Pi (see Quick start).
 - POS: instant search, camera + USB scan, **FEFO** batch allocation, expired batches blocked, live GST, item discounts,
   optional per-batch near-expiry auto-markdown, cash/UPI/card/split
 - Printable invoices: 58mm, 80mm thermal and A4 (`Ctrl+P`)
+- Customer credit (udhaar): sell on credit or part-pay, record payments, see who owes what, WhatsApp reminder links, dues CSV
 - Reports (`/reports`): sales, discounts, GST by slab (CGST/SGST), payments, daily sales, top products; CSV export for your accountant
 - Dashboard: today's sales, profit estimate, low stock, expiring soon
 - Optional PIN login (Settings → PIN protection), 30-day sessions, lockout after 5 wrong tries

@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { Db } from "@/db/client";
 import {
   batches,
+  customers,
   invoiceItems,
   invoices,
   PAYMENT_MODES,
@@ -41,13 +42,16 @@ export const invoiceInput = z.object({
   items: z.array(cartLineInput).min(1, "Cart is empty").max(200, "Too many lines on one bill (200 max)"),
   customerName: z.string().trim().min(1).max(100).nullish(),
   customerPhone: z.string().trim().min(1).max(30).nullish(),
+  /** Required (existing, active customer) whenever any part of the bill is on credit. */
+  customerId: z.number().int().positive().nullish(),
   paymentMode: z.enum(PAYMENT_MODES),
-  /** Only used for split payments (paise); must sum to the grand total. */
+  /** Only used for split payments (paise); cash + upi + card + credit must equal the grand total. */
   split: z
     .object({
       cash: z.number().int().min(0).max(10_000_000_000).default(0),
       upi: z.number().int().min(0).max(10_000_000_000).default(0),
       card: z.number().int().min(0).max(10_000_000_000).default(0),
+      credit: z.number().int().min(0).max(10_000_000_000).default(0),
     })
     .nullish(),
 });
@@ -163,16 +167,26 @@ export function createInvoice(db: Db, raw: InvoiceInput, now: Date = new Date())
     let cash = 0;
     let upi = 0;
     let card = 0;
+    let credit = 0;
     if (input.paymentMode === "split") {
       cash = input.split?.cash ?? 0;
       upi = input.split?.upi ?? 0;
       card = input.split?.card ?? 0;
-      if (cash + upi + card !== totals.grandTotal) {
+      credit = input.split?.credit ?? 0;
+      if (cash + upi + card + credit !== totals.grandTotal) {
         throw new ServiceError("SPLIT_MISMATCH", "Split payments must add up to the total");
       }
     } else if (input.paymentMode === "cash") cash = totals.grandTotal;
     else if (input.paymentMode === "upi") upi = totals.grandTotal;
-    else card = totals.grandTotal;
+    else if (input.paymentMode === "card") card = totals.grandTotal;
+    else credit = totals.grandTotal; // "credit": the whole bill goes on the customer's account
+
+    // Credit needs a real customer; the customer's name/phone are snapshotted onto the bill.
+    const customer = input.customerId ? tx.select().from(customers).where(eq(customers.id, input.customerId)).get() : undefined;
+    if (input.customerId && !customer) throw new ServiceError("CUSTOMER_NOT_FOUND", "Customer not found");
+    if (credit > 0 && (!customer || !customer.isActive)) {
+      throw new ServiceError("CUSTOMER_REQUIRED", "Pick a customer to sell on credit");
+    }
 
     const prefix = `INV-${today.replaceAll("-", "")}-`;
     const seq =
@@ -186,8 +200,9 @@ export function createInvoice(db: Db, raw: InvoiceInput, now: Date = new Date())
       .insert(invoices)
       .values({
         invoiceNumber: `${prefix}${String(seq + 1).padStart(4, "0")}`,
-        customerName: input.customerName ?? null,
-        customerPhone: input.customerPhone ?? null,
+        customerId: customer?.id ?? null,
+        customerName: customer?.name ?? input.customerName ?? null,
+        customerPhone: customer?.phone ?? input.customerPhone ?? null,
         subtotal: totals.subtotal,
         discountTotal: totals.discountTotal,
         taxTotal: totals.taxTotal,
@@ -197,6 +212,7 @@ export function createInvoice(db: Db, raw: InvoiceInput, now: Date = new Date())
         cashAmount: cash,
         upiAmount: upi,
         cardAmount: card,
+        creditAmount: credit,
         createdAt: ts,
       })
       .returning()

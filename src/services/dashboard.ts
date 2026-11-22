@@ -4,6 +4,7 @@ import { invoiceItems, invoices } from "@/db/schema";
 import { rangeBounds, todayISO } from "@/lib/dates";
 import { divRound } from "@/lib/money";
 import { MILLI } from "@/lib/qty";
+import { outstandingTotal } from "./customers";
 import { getExpiringBatches, getLowStock } from "./inventory";
 import { getSettings } from "./settings";
 
@@ -14,6 +15,8 @@ export interface DashboardStats {
   profitEstimate: number;
   lowStockCount: number;
   expiringSoonCount: number;
+  /** Total owed to the shop by credit customers, paise. */
+  outstandingDues: number;
 }
 
 /** [start, end) of the local calendar day containing `now`, as ISO timestamps. */
@@ -62,5 +65,6 @@ export function getDashboardStats(db: Db, now: Date = new Date()): DashboardStat
     profitEstimate: estimateProfit(items),
     lowStockCount: getLowStock(db, today).length,
     expiringSoonCount: getExpiringBatches(db, today, settings.expiryWarnDays).length,
+    outstandingDues: outstandingTotal(db),
   };
 }

@@ -1,12 +1,14 @@
 import { and, asc, eq, gt, gte, lt } from "drizzle-orm";
 import type { Db } from "@/db/client";
-import { batches, invoiceItems, invoices, products } from "@/db/schema";
+import { batches, invoiceItems, invoices, payments, products } from "@/db/schema";
 import { isExpired, localDateTime, rangeBounds, todayISO } from "@/lib/dates";
 import { type Cell, num, toCsv } from "@/lib/csv";
 import { splitGst } from "@/lib/gst";
 import { divRound, paiseToDecimal } from "@/lib/money";
 import { formatQty, MILLI } from "@/lib/qty";
 import { estimateProfit } from "./dashboard";
+import { getCustomer, getCustomerLedger, listCustomersWithBalance } from "./customers";
+import { ServiceError } from "./types";
 
 export interface SlabRow {
   rate: number;
@@ -31,7 +33,10 @@ export interface SalesReport {
   roundOff: number;
   /** Sum of invoice grand totals (what customers paid). */
   netSales: number;
-  payments: { cash: number; upi: number; card: number };
+  /** How this period's bills were settled; credit = put on customers' accounts (cash + upi + card + credit = net sales). */
+  payments: { cash: number; upi: number; card: number; credit: number };
+  /** Money received from customers against dues in this period (separate from sales, for the cash drawer). */
+  duesCollected: { cash: number; upi: number; card: number; total: number };
   profitEstimate: number;
   gstSlabs: SlabRow[];
   daily: { date: string; invoices: number; total: number }[];
@@ -57,6 +62,13 @@ function loadRange(db: Db, from: string, to: string) {
 export function getSalesReport(db: Db, from: string, to: string): SalesReport {
   const { inv, items } = loadRange(db, from, to);
   const sum = <T,>(rows: T[], f: (r: T) => number) => rows.reduce((s, r) => s + f(r), 0);
+  const { start: rangeStart, end: rangeEnd } = rangeBounds(from, to);
+  const dues = db
+    .select()
+    .from(payments)
+    .where(and(gte(payments.createdAt, rangeStart), lt(payments.createdAt, rangeEnd)))
+    .all();
+  const duesBy = (mode: "cash" | "upi" | "card") => sum(dues.filter((p) => p.mode === mode), (p) => p.amount);
 
   const slabMap = new Map<number, { taxable: number; tax: number }>();
   for (const { item } of items) {
@@ -96,7 +108,9 @@ export function getSalesReport(db: Db, from: string, to: string): SalesReport {
       cash: sum(inv, (i) => i.cashAmount),
       upi: sum(inv, (i) => i.upiAmount),
       card: sum(inv, (i) => i.cardAmount),
+      credit: sum(inv, (i) => i.creditAmount),
     },
+    duesCollected: { cash: duesBy("cash"), upi: duesBy("upi"), card: duesBy("card"), total: sum(dues, (p) => p.amount) },
     profitEstimate: estimateProfit(items.map(({ item }) => item)),
     gstSlabs,
     daily: [...dayMap.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([date, v]) => ({ date, ...v })),
@@ -109,22 +123,29 @@ export function getSalesReport(db: Db, from: string, to: string): SalesReport {
 
 /* ---------------- CSV exports ---------------- */
 
-export const EXPORT_TYPES = ["sales", "items", "gst", "stock"] as const;
+export const EXPORT_TYPES = ["sales", "items", "gst", "stock", "dues", "ledger"] as const;
 export type ExportType = (typeof EXPORT_TYPES)[number];
 
 const money = (p: number) => num(paiseToDecimal(p));
 
-export function buildCsv(db: Db, type: ExportType, from: string, to: string, now: Date = new Date()): { filename: string; csv: string } {
+export function buildCsv(
+  db: Db,
+  type: ExportType,
+  from: string,
+  to: string,
+  now: Date = new Date(),
+  customerId?: number,
+): { filename: string; csv: string } {
   const range = from === to ? from : `${from}_to_${to}`;
 
   if (type === "sales") {
     const { inv } = loadRange(db, from, to);
-    const header = ["Invoice", "Date", "Customer", "Phone", "Payment", "Subtotal", "Discount", "Taxable", "CGST", "SGST", "Round off", "Total"];
+    const header = ["Invoice", "Date", "Customer", "Phone", "Payment", "Subtotal", "Discount", "Taxable", "CGST", "SGST", "Round off", "Credit", "Total"];
     const rows: Cell[][] = inv.map((i) => {
       const { cgst, sgst } = splitGst(i.taxTotal);
       const taxable = i.subtotal - i.discountTotal - i.taxTotal;
       return [i.invoiceNumber, localDateTime(i.createdAt), i.customerName, i.customerPhone, i.paymentMode,
-        money(i.subtotal), money(i.discountTotal), money(taxable), money(cgst), money(sgst), money(i.roundOff), money(i.grandTotal)];
+        money(i.subtotal), money(i.discountTotal), money(taxable), money(cgst), money(sgst), money(i.roundOff), money(i.creditAmount), money(i.grandTotal)];
     });
     return { filename: `sales-${range}.csv`, csv: toCsv(header, rows) };
   }
@@ -145,6 +166,28 @@ export function buildCsv(db: Db, type: ExportType, from: string, to: string, now
     const rows: Cell[][] = r.gstSlabs.map((s) => [s.rate, money(s.taxable), money(s.cgst), money(s.sgst), money(s.tax)]);
     rows.push(["Total", money(r.taxableTotal), money(r.cgst), money(r.sgst), money(r.taxTotal)]);
     return { filename: `gst-${range}.csv`, csv: toCsv(header, rows) };
+  }
+
+  if (type === "dues") {
+    const owing = listCustomersWithBalance(db).filter((r) => r.balance > 0);
+    const rows: Cell[][] = owing.map((r) => [r.customer.name, r.customer.phone, money(r.balance)]);
+    rows.push(["Total", null, money(owing.reduce((s, r) => s + r.balance, 0))]);
+    return { filename: `dues-${todayISO(now)}.csv`, csv: toCsv(["Customer", "Phone", "Balance due"], rows) };
+  }
+
+  if (type === "ledger") {
+    const customer = customerId === undefined ? undefined : getCustomer(db, customerId);
+    if (!customer) throw new ServiceError("NOT_FOUND", "Customer not found");
+    const rows: Cell[][] = getCustomerLedger(db, customer.id).map((e) => [
+      localDateTime(e.at),
+      e.kind === "credit" ? "Credit given" : "Payment received",
+      e.label,
+      e.kind === "credit" ? money(e.amount) : null,
+      e.kind === "payment" ? money(e.amount) : null,
+      money(e.balanceAfter),
+    ]);
+    const slug = customer.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "customer";
+    return { filename: `ledger-${slug}.csv`, csv: toCsv(["Date", "Type", "Details", "Credit given", "Payment received", "Balance"], rows) };
   }
 
   // stock: current batches with stock (not date-ranged)

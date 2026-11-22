@@ -12,7 +12,16 @@ export async function GET(req: Request) {
   const type = url.searchParams.get("type") as ExportType;
   if (!EXPORT_TYPES.includes(type)) return new Response("Unknown export type", { status: 400 });
   const { from, to } = parseRange(url.searchParams.get("from"), url.searchParams.get("to"));
-  const { filename, csv } = buildCsv(getDb(), type, from, to);
+  const rawCustomer = url.searchParams.get("customer");
+  const customer = rawCustomer === null ? NaN : Number(rawCustomer);
+  if (type === "ledger" && !Number.isInteger(customer)) return new Response("Missing customer", { status: 400 });
+  let built;
+  try {
+    built = buildCsv(getDb(), type, from, to, new Date(), Number.isInteger(customer) ? customer : undefined);
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
+  const { filename, csv } = built;
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",

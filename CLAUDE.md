@@ -15,7 +15,8 @@ Do not add dependencies without a clear justification.
 | `npm run dev` | Dev server on `0.0.0.0:3000` (reachable from phone on same Wi-Fi) |
 | `npm run dev:https` / `start:https` | Same, with self-signed HTTPS (needed for phone camera scanning over LAN) |
 | `npm run build` / `npm start` | Production build / serve on `0.0.0.0` |
-| `npm run db:push` | Create/sync the SQLite schema from `src/db/schema.ts` |
+| `npm run db:push` (= `db:migrate`) | Apply the committed SQL migrations (`drizzle/*.sql`) to `data/app.db`: creates a new DB or upgrades an existing one, non-interactive |
+| `npm run db:generate` | After editing `src/db/schema.ts`: generate a new migration file (commit it) |
 | `npm run db:seed` | Load sample grocery + pharmacy data (`-- --reset` wipes first) |
 | `npm test` | Vitest (in-memory SQLite) |
 | `npm run typecheck` | `tsc --noEmit` |
@@ -42,6 +43,18 @@ Off by default; set in Settings (4-12 digits, scrypt-hashed in the `settings` ta
 - `isAuthed()` must read `cookies()` *before* any early return, otherwise a build made with no PIN prerenders pages as static HTML.
 - 5 wrong PINs lock logins for 60 s (global, in-memory). Changing/removing the PIN rotates the session secret (signs everyone out).
 - Disabled in demo mode. Never log or return `pinHash` / `sessionSecret`.
+
+## Database changes (migrations)
+- **Never run `drizzle-kit push` against a real database.** It treats `default 0` as "no default" and demands an interactive data-loss confirmation (it failed on a populated DB).
+  Schema changes = edit `schema.ts`, `npm run db:generate`, review and commit the SQL, then `npm run db:push` (which runs `src/db/migrate.ts`).
+- `runMigrations` also upgrades databases created by the old `push` flow: it records migration 0000 as already applied, then applies the rest. Keep migrations **additive** (new tables/columns with defaults).
+  `tests/migrate.test.ts` covers fresh, legacy-with-data and re-run cases; extend it when adding a migration that touches existing rows.
+
+## Customer credit (udhaar)
+- Tables `customers`, `payments`; `invoices.customer_id` + `credit_amount`. **A balance is computed, never stored**: Σ `credit_amount` of PAID invoices − Σ payments (`balanceOf` in `src/services/customers.ts`), so voids/returns correct it automatically.
+- Credit needs an existing active customer (`CUSTOMER_REQUIRED`); `cash + upi + card + credit` must equal the grand total. Payments can't exceed the balance and are cash/upi/card only.
+- Reports: `payments.credit` (sales on credit) and `duesCollected` (money received) are reported separately so the cash drawer reconciles. CSV types `dues` and `ledger`.
+- WhatsApp reminders are plain `wa.me` links built locally (`src/lib/phone.ts`): no API, nothing sent by the server.
 
 ## Security & dependencies
 - `npm run audit:prod` (= `npm audit --omit=dev --audit-level=high`) must stay clean; plain `npm audit` is currently 0 too. Re-check after any dependency change.

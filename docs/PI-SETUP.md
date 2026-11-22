@@ -55,7 +55,7 @@ If that fails, run `npm rebuild better-sqlite3 --build-from-source` (needs `buil
 
 ## 4. Create the database and build
 ```bash
-npm run db:push        # creates data/app.db (safe to re-run; it only syncs the schema)
+npm run db:push        # creates data/app.db (applies the SQL migrations; safe on existing data)
 npm run build
 ```
 Ask the owner: *"Do you want sample data (demo products) or a clean empty database for real use?"*
@@ -124,6 +124,10 @@ Remind the owner to copy `~/backups` off the Pi occasionally (USB stick or PC). 
 Add product → scan a barcode → the app asks `world.openfoodfacts.org` (and its Beauty/Products sister sites) for the name. It sends only the
 barcode number. Check once from the Pi: `curl -s -o /dev/null -w "%{http_code}\n" https://world.openfoodfacts.org/api/v2/product/3017620422003.json`
 should print `200`. If the Pi has no internet, the form still works: you just type the details.
+
+## 7c. About `db:push` (important)
+In this project `npm run db:push` applies the committed SQL migrations. It is safe to run on a database that already has your data, asks no questions, and
+upgrades databases created by older versions. Do **not** run `npx drizzle-kit push` directly: it can demand a destructive confirmation. Always back up first.
 
 ## 8. Updating later
 ```bash

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { barcodeLookupAction, checkoutAction, searchProductsAction } from "@/app/actions";
+import { CustomerPicker, type PickedCustomer } from "@/components/pos/CustomerPicker";
 import { BarcodeScannerModal } from "@/components/scanner/BarcodeScannerModal";
 import { useBarcodeWedge } from "@/hooks/useBarcodeWedge";
 import { previewCartLine } from "@/lib/cart";
@@ -13,7 +14,7 @@ import { formatPaise, rupeesToPaise } from "@/lib/money";
 import { formatQty, MILLI, toMilli } from "@/lib/qty";
 import type { ProductStock } from "@/services/inventory";
 
-type PayMode = "cash" | "upi" | "card" | "split";
+type PayMode = "cash" | "upi" | "card" | "split" | "credit";
 
 interface CartLine {
   product: ProductStock;
@@ -58,7 +59,8 @@ export function PosClient() {
   const [cart, setCart] = useState<CartLine[]>([]);
   const [scanning, setScanning] = useState(false);
   const [payMode, setPayMode] = useState<PayMode>("cash");
-  const [split, setSplit] = useState({ cash: "", upi: "", card: "" });
+  const [split, setSplit] = useState({ cash: "", upi: "", card: "", credit: "" });
+  const [picked, setPicked] = useState<PickedCustomer | null>(null);
   const [customer, setCustomer] = useState({ name: "", phone: "" });
   const [missing, setMissing] = useState<string | null>(null); // scanned barcode we have no product for
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
@@ -155,16 +157,19 @@ export function PosClient() {
     [previews],
   );
 
-  const splitPaise = (k: "cash" | "upi" | "card") => {
+  const splitPaise = (k: "cash" | "upi" | "card" | "credit") => {
     try {
       return split[k].trim() ? rupeesToPaise(split[k]) : 0;
     } catch {
       return NaN;
     }
   };
-  const splitSum = splitPaise("cash") + splitPaise("upi") + splitPaise("card");
+  const splitSum = splitPaise("cash") + splitPaise("upi") + splitPaise("card") + splitPaise("credit");
   const splitOk = payMode !== "split" || splitSum === totals.grandTotal;
-  const canPay = cart.length > 0 && !hasError && splitOk && !paying;
+  // How much of this bill goes on the customer's account (a customer is then required).
+  const creditPaise = payMode === "credit" ? totals.grandTotal : payMode === "split" ? splitPaise("credit") || 0 : 0;
+  const needsCustomer = creditPaise > 0;
+  const canPay = cart.length > 0 && !hasError && splitOk && (!needsCustomer || !!picked) && !paying;
 
   const pay = useCallback(() => {
     if (!canPay) return;
@@ -178,15 +183,19 @@ export function PosClient() {
           applyMarkdown: l.auto,
         })),
         paymentMode: payMode,
-        customerName: customer.name || null,
-        customerPhone: customer.phone || null,
-        split: payMode === "split" ? { cash: splitPaise("cash"), upi: splitPaise("upi"), card: splitPaise("card") } : null,
+        customerId: needsCustomer && picked ? picked.id : null,
+        customerName: needsCustomer ? null : customer.name || null,
+        customerPhone: needsCustomer ? null : customer.phone || null,
+        split:
+          payMode === "split"
+            ? { cash: splitPaise("cash"), upi: splitPaise("upi"), card: splitPaise("card"), credit: splitPaise("credit") }
+            : null,
       });
       if (res.ok) router.push(`/invoices/${res.invoiceId}?print=1`);
       else flash("err", res.error);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canPay, cart, payMode, customer, split, router, flash]);
+  }, [canPay, cart, payMode, customer, split, picked, needsCustomer, router, flash]);
 
   /* ---- keyboard shortcuts: F2 search, F9 pay ---- */
   useEffect(() => {
@@ -294,7 +303,7 @@ export function PosClient() {
                     <QtyInput value={l.qty} step={decimal ? 250 : MILLI} decimal={decimal} onChange={(q) => update(l.product.id, { qty: q })} />
                     <span className="text-xs text-slate-500">{l.product.unitType}</span>
                     <div className="flex items-center gap-1">
-                      <select aria-label="Discount type" value={l.auto ? "auto" : l.discountType} className="w-28"
+                      <select aria-label="Discount type" value={l.auto ? "auto" : l.discountType} className="w-40"
                         onChange={(e) => {
                           const v = e.target.value;
                           if (v === "auto") update(l.product.id, { auto: true, discountType: "none", discountValue: 0 });
@@ -343,24 +352,35 @@ export function PosClient() {
         </div>
 
         <div className="card space-y-3">
-          <div className="grid grid-cols-4 gap-1" role="radiogroup" aria-label="Payment mode">
-            {(["cash", "upi", "card", "split"] as const).map((m) => (
+          <div className="grid grid-cols-5 gap-1" role="radiogroup" aria-label="Payment mode">
+            {(["cash", "upi", "card", "split", "credit"] as const).map((m) => (
               <button key={m} type="button" role="radio" aria-checked={payMode === m} onClick={() => setPayMode(m)}
                 className={`btn px-1 text-sm ${m === "upi" ? "uppercase" : "capitalize"} ${payMode === m ? "bg-emerald-700 text-white" : "border border-slate-300 bg-white"}`}>{m}</button>
             ))}
           </div>
           {payMode === "split" && (
-            <div className="grid grid-cols-3 gap-2">
-              {(["cash", "upi", "card"] as const).map((k) => (
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              {(["cash", "upi", "card", "credit"] as const).map((k) => (
                 <label key={k} className="text-xs capitalize">{k} ₹
                   <input inputMode="decimal" value={split[k]} onChange={(e) => setSplit((s) => ({ ...s, [k]: e.target.value }))} className="w-full" />
                 </label>
               ))}
-              <p className={`col-span-3 text-xs ${splitOk ? "text-emerald-700" : "text-red-700"}`}>
+              <button type="button" className="btn-secondary col-span-2 min-h-10 text-xs sm:col-span-4"
+                onClick={() => {
+                  const others = splitPaise("cash") + splitPaise("upi") + splitPaise("card");
+                  if (Number.isNaN(others) || others > totals.grandTotal) return;
+                  const rest = totals.grandTotal - others;
+                  setSplit((s) => ({ ...s, credit: rest ? String(rest / 100) : "" }));
+                }}>
+                Put the rest on credit
+              </button>
+              <p className={`col-span-2 text-xs sm:col-span-4 ${splitOk ? "text-emerald-700" : "text-red-700"}`}>
                 {splitOk ? "Split matches total" : `Split ${Number.isNaN(splitSum) ? "invalid" : formatPaise(splitSum)} ≠ ${formatPaise(totals.grandTotal)}`}
               </p>
             </div>
           )}
+          {needsCustomer && <CustomerPicker value={picked} onChange={setPicked} creditAmount={creditPaise} />}
+          {!needsCustomer && (
           <details>
             <summary className="cursor-pointer text-sm text-slate-600">Customer (optional)</summary>
             <div className="mt-2 grid gap-2">
@@ -368,11 +388,12 @@ export function PosClient() {
               <input placeholder="Phone" inputMode="tel" value={customer.phone} onChange={(e) => setCustomer((c) => ({ ...c, phone: e.target.value }))} />
             </div>
           </details>
+          )}
         </div>
 
         <div className="fixed inset-x-0 bottom-14 z-20 border-t border-slate-200 bg-white p-2 md:static md:border-0 md:bg-transparent md:p-0">
           <button type="button" disabled={!canPay} onClick={pay} className="btn-primary min-h-14 w-full text-lg">
-            {paying ? "Saving…" : `Pay ${formatPaise(totals.grandTotal)}`} <span className="hidden text-xs opacity-80 md:inline">(F9)</span>
+            {paying ? "Saving…" : payMode === "credit" ? `Put ${formatPaise(totals.grandTotal)} on credit` : `Pay ${formatPaise(totals.grandTotal)}`} <span className="hidden text-xs opacity-80 md:inline">(F9)</span>
           </button>
         </div>
       </aside>

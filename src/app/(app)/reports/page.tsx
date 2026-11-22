@@ -39,6 +39,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     ["items", "Line items"],
     ["gst", "GST summary"],
     ["stock", "Current stock"],
+    ["dues", "Customer dues"],
   ] as const;
 
   return (
@@ -74,10 +75,19 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         <section className="card">
           <h2 className="mb-2 font-semibold">Payments</h2>
           <dl className="space-y-1 text-sm">
-            {(["cash", "upi", "card"] as const).map((k) => (
-              <div key={k} className="flex justify-between"><dt className="uppercase text-slate-600">{k}</dt><dd>{formatPaise(r.payments[k])}</dd></div>
+            {(["cash", "upi", "card", "credit"] as const).map((k) => (
+              <div key={k} className="flex justify-between"><dt className="uppercase text-slate-600">{k === "credit" ? "On credit (udhaar)" : k}</dt><dd>{formatPaise(r.payments[k])}</dd></div>
             ))}
           </dl>
+          <div className="mt-3 border-t border-slate-100 pt-2">
+            <h3 className="text-sm font-semibold">Dues collected in this period</h3>
+            <dl className="mt-1 space-y-1 text-sm">
+              {(["cash", "upi", "card"] as const).map((k) => (
+                <div key={k} className="flex justify-between"><dt className="uppercase text-slate-600">{k}</dt><dd>{formatPaise(r.duesCollected[k])}</dd></div>
+              ))}
+              <div className="flex justify-between font-medium"><dt>Total</dt><dd>{formatPaise(r.duesCollected.total)}</dd></div>
+            </dl>
+          </div>
         </section>
         <section className="card overflow-x-auto">
           <h2 className="mb-2 font-semibold">GST by slab</h2>
@@ -127,7 +137,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
             <a key={k} href={`/reports/export?type=${k}&${q}`} download className="btn-secondary">{label}</a>
           ))}
         </div>
-        <p className="mt-2 text-xs text-slate-500">&ldquo;Current stock&rdquo; is a snapshot of today and ignores the date range.</p>
+        <p className="mt-2 text-xs text-slate-500">&ldquo;Current stock&rdquo; and &ldquo;Customer dues&rdquo; are snapshots of today and ignore the date range.</p>
       </section>
     </div>
   );
