@@ -1,7 +1,7 @@
 import { and, eq, gte, lt, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { invoiceItems, invoices } from "@/db/schema";
-import { todayISO } from "@/lib/dates";
+import { rangeBounds, todayISO } from "@/lib/dates";
 import { divRound } from "@/lib/money";
 import { MILLI } from "@/lib/qty";
 import { getExpiringBatches, getLowStock } from "./inventory";
@@ -18,9 +18,8 @@ export interface DashboardStats {
 
 /** [start, end) of the local calendar day containing `now`, as ISO timestamps. */
 export function dayRange(now: Date): { start: string; end: string } {
-  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return { start: start.toISOString(), end: end.toISOString() };
+  const d = todayISO(now);
+  return rangeBounds(d, d);
 }
 
 /**

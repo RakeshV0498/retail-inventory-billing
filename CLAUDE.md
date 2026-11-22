@@ -43,6 +43,13 @@ Off by default; set in Settings (4-12 digits, scrypt-hashed in the `settings` ta
 - 5 wrong PINs lock logins for 60 s (global, in-memory). Changing/removing the PIN rotates the session secret (signs everyone out).
 - Disabled in demo mode. Never log or return `pinHash` / `sessionSecret`.
 
+## Reports & CSV export
+`src/services/reports.ts` (`getSalesReport`, `buildCsv`), UI at `/reports`, downloads at `/reports/export` (calls `requireAuth()`).
+- Paid invoices only (void excluded); ranges are **local calendar days, inclusive**, so the server timezone matters.
+- CGST/SGST are computed per slab and summed (`getSalesReport`), so GST rows always reconcile with totals.
+- CSV via `src/lib/csv.ts`: money cells use `num(paiseToDecimal(x))` (integer math, never floats); text cells get the
+  formula-injection guard, so never pass amounts as plain strings.
+
 ## Demo deployment
 `netlify.toml` sets `NETLIFY_DEMO=1`: `getDb()` then auto-migrates and seeds a `/tmp` DB (`src/db/bootstrap.ts`).
 It is ephemeral and for demos only — never real data. Normal runs (env unset) are unaffected.

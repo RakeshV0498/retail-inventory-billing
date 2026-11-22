@@ -9,6 +9,7 @@ const LINKS = [
   { href: "/pos", label: "POS", icon: "₹" },
   { href: "/inventory", label: "Inventory", icon: "▤" },
   { href: "/invoices", label: "Invoices", icon: "🧾" },
+  { href: "/reports", label: "Reports", icon: "📊" },
   { href: "/settings", label: "Settings", icon: "⚙" },
 ] as const;
 
@@ -42,8 +43,8 @@ export function Nav() {
       </aside>
 
       {/* Mobile bottom bar */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden print:hidden">
-        {LINKS.slice(0, 4).map((l) => (
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] md:hidden print:hidden">
+        {LINKS.slice(0, 5).map((l) => (
           <Link
             key={l.href}
             href={l.href}

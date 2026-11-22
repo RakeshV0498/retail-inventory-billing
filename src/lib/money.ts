@@ -33,3 +33,11 @@ export function divRound(numerator: number, denominator: number): number {
   const d = Math.abs(denominator);
   return sign * Math.floor((2 * n + d) / (2 * d));
 }
+
+/** Plain decimal rupees from paise using integer math only: 123456 -> "1234.56", -5 -> "-0.05". For CSV/export. */
+export function paiseToDecimal(paise: number): string {
+  const neg = paise < 0;
+  const abs = Math.abs(paise);
+  const s = `${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, "0")}`;
+  return neg && abs !== 0 ? `-${s}` : s;
+}

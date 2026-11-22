@@ -17,6 +17,14 @@
 - Internet access on the Pi, and the owner has a free Tailscale account and the Tailscale app on their phone.
 - Check: `uname -m`, `cat /etc/os-release | head -3`, `df -h /` (need > 2 GB free), `free -h`.
 
+## 0b. Timezone (important)
+The app's "today", invoice times, dashboard and reports all use the Pi's clock and timezone. Set it for India:
+```bash
+sudo timedatectl set-timezone Asia/Kolkata
+timedatectl | grep -E "Time zone|synchronized"
+```
+Check: shows `Asia/Kolkata` and `System clock synchronized: yes`. If you change the timezone later, restart the service.
+
 ## 1. System update and base tools
 ```bash
 sudo apt update && sudo apt full-upgrade -y
@@ -121,7 +129,14 @@ npm ci && npm run build && npm run db:push
 sudo systemctl restart retail-billing
 ```
 Check: `systemctl is-active retail-billing` is `active` and the app loads.
+Releases that only add pages/settings (PIN login, reports) need no database migration; `db:push` is still safe to run.
 If the update breaks things: `git log --oneline -5`, `git checkout <previous-commit>`, rebuild, restart, and restore the backup if the data was affected (ask first).
+
+## 8b. Optional: PIN login (needs release with PIN support)
+Open **Settings → PIN protection** in the app and turn on a 4–12 digit PIN. Sessions last 30 days; 5 wrong tries lock logins for 60 s.
+Changing or removing the PIN signs everyone out. Forgot it? Stop the app, then:
+`sqlite3 ~/retail-inventory-billing/data/app.db "delete from settings where key in ('pinHash','sessionSecret');"` and start it again
+(ask the owner first, and take a backup before touching the database).
 
 ## 9. Final report to the owner
 Summarize in a short list: Node version, app commit (`git rev-parse --short HEAD`), service status, the private HTTPS URL, backup schedule, and anything skipped or failing.

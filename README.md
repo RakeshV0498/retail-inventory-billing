@@ -30,6 +30,7 @@ For real use, self-host on a PC / Raspberry Pi (see Quick start).
 - POS: instant search, camera + USB scan, **FEFO** batch allocation, expired batches blocked, live GST, item discounts,
   optional per-batch near-expiry auto-markdown, cash/UPI/card/split
 - Printable invoices: 58mm, 80mm thermal and A4 (`Ctrl+P`)
+- Reports (`/reports`): sales, discounts, GST by slab (CGST/SGST), payments, daily sales, top products; CSV export for your accountant
 - Dashboard: today's sales, profit estimate, low stock, expiring soon
 - Optional PIN login (Settings → PIN protection), 30-day sessions, lockout after 5 wrong tries
 - Shortcuts (desktop): `F2` search · `Enter` add · `F9` pay · `Ctrl+P` print
