@@ -36,11 +36,14 @@ export default async function DashboardPage() {
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <h1 className="text-xl font-bold md:text-2xl">{settings.storeName}</h1>
         <div className="flex gap-2">
-          <Link href="/settings" className="btn-secondary">Settings</Link>
-          <Link href="/pos" className="btn-primary">New bill</Link>
+          <Link href="/pos" className="btn-primary min-h-12 flex-1 text-base md:min-h-11 md:flex-none">New bill</Link>
+          <Link href="/settings" aria-label="Settings" className="btn-secondary size-12 shrink-0 px-0 text-xl md:size-auto md:min-h-11 md:px-4 md:text-base">
+            <span aria-hidden className="md:hidden">⚙</span>
+            <span className="hidden md:inline">Settings</span>
+          </Link>
         </div>
       </div>
 
@@ -53,7 +56,7 @@ export default async function DashboardPage() {
 
       {expired.length > 0 && (
         <Link href="/inventory?tab=expired" className="block rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-medium text-red-800">
-          {expired.length} expired batch(es) still in stock — blocked from sale. Review and write off →
+          {expired.length} expired batch(es) still in stock — blocked from sale. Tap to write them off →
         </Link>
       )}
 

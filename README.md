@@ -26,7 +26,7 @@ For real use, self-host on a PC / Raspberry Pi (see Quick start).
 
 ## Features
 - Products with batches, MFG/expiry, MRP/selling/purchase price, GST slabs (0/5/12/18), loose (decimal) quantities
-- Low-stock and near-expiry (30/60 day) alerts; expired stock write-off
+- Low-stock and near-expiry (30/60 day) alerts; write off expired stock (one batch or all at once, with cost lost), archive/restore products, delete mistakes
 - POS: instant search, camera + USB scan, **FEFO** batch allocation, expired batches blocked, live GST, item discounts,
   optional per-batch near-expiry auto-markdown, cash/UPI/card/split
 - Printable invoices: 58mm, 80mm thermal and A4 (`Ctrl+P`)

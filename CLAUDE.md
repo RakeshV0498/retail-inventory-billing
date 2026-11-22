@@ -43,6 +43,13 @@ Off by default; set in Settings (4-12 digits, scrypt-hashed in the `settings` ta
 - 5 wrong PINs lock logins for 60 s (global, in-memory). Changing/removing the PIN rotates the session secret (signs everyone out).
 - Disabled in demo mode. Never log or return `pinHash` / `sessionSecret`.
 
+## Expired stock, archive and delete
+- Write-off (`writeOffBatch`, `writeOffExpired`) goes through `writeOffInTx`: batch update + `expired_wastage` movement in one transaction.
+- Written-off (qty 0) batches are hidden by default (`getProductBatches`); the ledger is never deleted.
+- `archiveProduct` is refused while sellable stock remains (leftover *expired* stock is written off first). Archived = `is_active=false`;
+  it must disappear from POS/search/lists and be unsellable and un-stockable. `deleteProduct` only for products with **no** batches, movements or invoice items.
+- Irreversible UI actions use `ConfirmSubmit`; every new action calls `requireAuth()` first.
+
 ## Reports & CSV export
 `src/services/reports.ts` (`getSalesReport`, `buildCsv`), UI at `/reports`, downloads at `/reports/export` (calls `requireAuth()`).
 - Paid invoices only (void excluded); ranges are **local calendar days, inclusive**, so the server timezone matters.

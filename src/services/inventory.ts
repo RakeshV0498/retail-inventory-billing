@@ -4,6 +4,7 @@ import type { Db } from "@/db/client";
 import {
   batches,
   CATEGORIES,
+  invoiceItems,
   pricingRules,
   products,
   stockMovements,
@@ -14,7 +15,8 @@ import {
 } from "@/db/schema";
 import { addDaysISO, daysBetween, isExpired, todayISO } from "@/lib/dates";
 import { sortFefo } from "@/lib/fefo";
-import { MILLI } from "@/lib/qty";
+import { divRound } from "@/lib/money";
+import { formatQty, MILLI } from "@/lib/qty";
 import { ServiceError, type Q } from "./types";
 
 /* ---------- validation ---------- */
@@ -70,7 +72,7 @@ export function createProduct(db: Db, raw: ProductInput): Product {
       .get();
   } catch (e) {
     if (e instanceof Error && /UNIQUE/i.test(e.message)) {
-      throw new ServiceError("DUPLICATE", "A product with this SKU or barcode already exists");
+      throw new ServiceError("DUPLICATE", "A product with this SKU or barcode already exists (it may be archived)");
     }
     throw e;
   }
@@ -82,6 +84,7 @@ export function addBatch(db: Db, raw: BatchInput, now: Date = new Date()): Batch
   return db.transaction((tx) => {
     const product = tx.select().from(products).where(eq(products.id, input.productId)).get();
     if (!product) throw new ServiceError("NOT_FOUND", "Product not found");
+    if (!product.isActive) throw new ServiceError("ARCHIVED", "This product is archived. Restore it before adding stock");
     if (!product.allowDecimalQty && input.quantity % MILLI !== 0) {
       throw new ServiceError("INVALID_QTY", "This product only supports whole quantities");
     }
@@ -144,6 +147,31 @@ export function addBatch(db: Db, raw: BatchInput, now: Date = new Date()): Batch
   });
 }
 
+/** Shared write-off body: always run inside a transaction so batch + ledger stay in step. */
+function writeOffInTx(tx: Q, batchId: number, quantity: number | undefined, note: string, now: Date): number {
+  const batch = tx.select().from(batches).where(eq(batches.id, batchId)).get();
+  if (!batch) throw new ServiceError("NOT_FOUND", "Batch not found");
+  const qty = quantity ?? batch.quantityAvailable;
+  if (!Number.isInteger(qty) || qty <= 0 || qty > batch.quantityAvailable) {
+    throw new ServiceError("INVALID_QTY", "Invalid write-off quantity");
+  }
+  tx.update(batches)
+    .set({ quantityAvailable: batch.quantityAvailable - qty })
+    .where(eq(batches.id, batchId))
+    .run();
+  tx.insert(stockMovements)
+    .values({
+      productId: batch.productId,
+      batchId,
+      type: "expired_wastage",
+      quantityDelta: -qty,
+      note,
+      createdAt: now.toISOString(),
+    })
+    .run();
+  return qty;
+}
+
 /** Write off remaining (or a given) quantity of a batch as expired wastage. */
 export function writeOffBatch(
   db: Db,
@@ -152,28 +180,79 @@ export function writeOffBatch(
   note = "Expired wastage",
   now: Date = new Date(),
 ): number {
+  return db.transaction((tx) => writeOffInTx(tx, batchId, quantity, note, now));
+}
+
+/** Purchase-price value (paise) of the stock in these batches, i.e. what is lost if written off. */
+export function expiredCostLost(rows: { batch: Batch }[]): number {
+  return rows.reduce((s, r) => s + divRound(r.batch.purchasePrice * r.batch.quantityAvailable, MILLI), 0);
+}
+
+export interface WriteOffSummary {
+  batches: number;
+  products: number;
+  /** paise */
+  costLost: number;
+}
+
+/** Write off EVERY expired batch that still holds stock, in one transaction. A second run is a no-op. */
+export function writeOffExpired(db: Db, today: string, now: Date = new Date()): WriteOffSummary {
   return db.transaction((tx) => {
-    const batch = tx.select().from(batches).where(eq(batches.id, batchId)).get();
-    if (!batch) throw new ServiceError("NOT_FOUND", "Batch not found");
-    const qty = quantity ?? batch.quantityAvailable;
-    if (!Number.isInteger(qty) || qty <= 0 || qty > batch.quantityAvailable) {
-      throw new ServiceError("INVALID_QTY", "Invalid write-off quantity");
+    const rows = getExpiredBatches(tx, today);
+    for (const r of rows) writeOffInTx(tx, r.batch.id, undefined, "Expired wastage (bulk)", now);
+    return { batches: rows.length, products: new Set(rows.map((r) => r.product.id)).size, costLost: expiredCostLost(rows) };
+  });
+}
+
+/* ---------- archive / restore / delete ---------- */
+
+/**
+ * Archive a product (hides it from POS, search and lists; history and old invoices are untouched).
+ * Refused while sellable stock remains. Leftover EXPIRED stock is written off in the same transaction.
+ */
+export function archiveProduct(db: Db, id: number, now: Date = new Date()): { writtenOff: number } {
+  return db.transaction((tx) => {
+    const p = tx.select().from(products).where(eq(products.id, id)).get();
+    if (!p) throw new ServiceError("NOT_FOUND", "Product not found");
+    if (!p.isActive) return { writtenOff: 0 };
+    const today = todayISO(now);
+    const stocked = tx
+      .select()
+      .from(batches)
+      .where(and(eq(batches.productId, id), gt(batches.quantityAvailable, 0)))
+      .all();
+    const sellable = stocked.filter((b) => !isExpired(b.expiryDate, today));
+    if (sellable.length > 0) {
+      const qty = sellable.reduce((s, b) => s + b.quantityAvailable, 0);
+      throw new ServiceError("HAS_STOCK", `${p.name} still has ${formatQty(qty)} ${p.unitType} in stock. Sell it first, then archive`);
     }
-    tx.update(batches)
-      .set({ quantityAvailable: batch.quantityAvailable - qty })
-      .where(eq(batches.id, batchId))
-      .run();
-    tx.insert(stockMovements)
-      .values({
-        productId: batch.productId,
-        batchId,
-        type: "expired_wastage",
-        quantityDelta: -qty,
-        note,
-        createdAt: now.toISOString(),
-      })
-      .run();
-    return qty;
+    let writtenOff = 0;
+    for (const b of stocked) writtenOff += writeOffInTx(tx, b.id, undefined, "Written off on archive", now);
+    tx.update(products).set({ isActive: false }).where(eq(products.id, id)).run();
+    return { writtenOff };
+  });
+}
+
+export function restoreProduct(db: Db, id: number): void {
+  const res = db.update(products).set({ isActive: true }).where(eq(products.id, id)).run();
+  if (res.changes !== 1) throw new ServiceError("NOT_FOUND", "Product not found");
+}
+
+/** True if the product ever had a batch, a stock movement or an invoice line. */
+export function productHasHistory(db: Q, id: number): boolean {
+  const count = (t: typeof batches | typeof stockMovements | typeof invoiceItems) =>
+    db.select({ n: sql<number>`count(*)` }).from(t).where(eq(t.productId, id)).get()?.n ?? 0;
+  return count(batches) + count(stockMovements) + count(invoiceItems) > 0;
+}
+
+/** Permanent delete: only for products with NO history (e.g. added by mistake). Otherwise archive. */
+export function deleteProduct(db: Db, id: number): void {
+  db.transaction((tx) => {
+    if (!tx.select().from(products).where(eq(products.id, id)).get()) throw new ServiceError("NOT_FOUND", "Product not found");
+    if (productHasHistory(tx, id)) {
+      throw new ServiceError("HAS_HISTORY", "This product has stock or sales history, so it can't be deleted. Archive it instead");
+    }
+    tx.delete(products).where(eq(products.id, id)).run();
   });
 }
 
@@ -233,8 +312,14 @@ export function getProduct(db: Q, id: number): Product | undefined {
   return db.select().from(products).where(eq(products.id, id)).get();
 }
 
-export function getProductBatches(db: Q, productId: number): Batch[] {
-  return sortFefo(db.select().from(batches).where(eq(batches.productId, productId)).all());
+export function listArchivedProducts(db: Q): Product[] {
+  return db.select().from(products).where(eq(products.isActive, false)).orderBy(asc(products.name)).all();
+}
+
+/** Batches in FEFO order. Emptied / written-off batches (qty 0) are hidden unless `includeEmpty`. */
+export function getProductBatches(db: Q, productId: number, opts: { includeEmpty?: boolean } = {}): Batch[] {
+  const rows = db.select().from(batches).where(eq(batches.productId, productId)).all();
+  return sortFefo(opts.includeEmpty ? rows : rows.filter((b) => b.quantityAvailable > 0));
 }
 
 /** Instant search by name / SKU / barcode (prefix-and-contains, case-insensitive). */

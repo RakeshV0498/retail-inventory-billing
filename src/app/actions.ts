@@ -10,10 +10,14 @@ import { toMilli } from "@/lib/qty";
 import { createInvoice, type InvoiceInput } from "@/services/billing";
 import {
   addBatch,
+  archiveProduct,
   createProduct,
+  deleteProduct,
   findByBarcode,
+  restoreProduct,
   searchProducts,
   writeOffBatch,
+  writeOffExpired,
   type ProductStock,
 } from "@/services/inventory";
 import { saveSettings } from "@/services/settings";
@@ -111,6 +115,69 @@ export async function writeOffAction(form: FormData) {
   }
   revalidatePath("/", "layout");
   redirect(`/inventory/${productId}?ok=1`);
+}
+
+/** Single batch write-off from the Expired tab. */
+export async function writeOffFromListAction(form: FormData) {
+  await requireAuth();
+  let error: string | null = null;
+  try {
+    writeOffBatch(getDb(), Number(str(form, "batchId")));
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/inventory?tab=expired&error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect("/inventory?tab=expired&done=1");
+}
+
+export async function writeOffAllExpiredAction() {
+  await requireAuth();
+  const res = writeOffExpired(getDb(), todayISO());
+  revalidatePath("/", "layout");
+  redirect(`/inventory?tab=expired&done=${res.batches}`);
+}
+
+export async function archiveProductAction(form: FormData) {
+  await requireAuth();
+  const id = Number(str(form, "productId"));
+  let error: string | null = null;
+  try {
+    archiveProduct(getDb(), id);
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/inventory/${id}?error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect("/inventory?tab=archived&done=archived");
+}
+
+export async function restoreProductAction(form: FormData) {
+  await requireAuth();
+  const id = Number(str(form, "productId"));
+  let error: string | null = null;
+  try {
+    restoreProduct(getDb(), id);
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/inventory/${id}?error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect(`/inventory/${id}?ok=1`);
+}
+
+export async function deleteProductAction(form: FormData) {
+  await requireAuth();
+  const id = Number(str(form, "productId"));
+  let error: string | null = null;
+  try {
+    deleteProduct(getDb(), id);
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/inventory/${id}?error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect("/inventory?done=deleted");
 }
 
 /* ---------- Settings ---------- */
