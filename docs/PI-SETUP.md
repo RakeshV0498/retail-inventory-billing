@@ -141,6 +141,9 @@ Check: `systemctl is-active retail-billing` is `active` and the app loads.
 Always run `db:push` when updating: some releases add database tables/columns (it is safe on your existing data and asks no questions).
 If the update breaks things: `git log --oneline -5`, `git checkout <previous-commit>`, rebuild, restart, and restore the backup if the data was affected (ask first).
 
+## 8a. Correcting sales (admin only)
+Open a bill under Invoices. Admins see **Edit details** (customer, how it was paid, notes), **Amend items** (change quantities or lines: the old bill is voided and a corrected bill `INV-…-A1` replaces it) and **Void bill** (stock returns to the shelf, customer dues are reversed, the record stays marked VOID). Voiding tells you what to refund. Nothing is ever deleted, and every change shows in Settings, then Activity log.
+
 ## 8b. Accounts (admin and staff)
 - **Already had a PIN?** After updating, it became the account `admin` with the **same PIN**. Sign in with username `admin` and your old PIN (everyone is signed out once by the update).
 - **No PIN yet?** Open the app, then Settings, then **Set up accounts**: create the first admin. Until then anyone can open the app and bills don't record who made them (the dashboard shows a reminder).

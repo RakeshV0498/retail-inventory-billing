@@ -60,7 +60,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
         </form>
       </section>
 
-      <p className="text-sm text-slate-600">{from === to ? from : `${from} → ${to}`} · paid invoices only</p>
+      <p className="text-sm text-slate-600">
+        {from === to ? from : `${from} → ${to}`} · paid invoices only
+        {r.voided.count > 0 && (
+          <> · <Link href={`/invoices?status=void&from=${from}&to=${to}`} className="underline">{r.voided.count} voided bill{r.voided.count === 1 ? "" : "s"} ({formatPaise(r.voided.total)}) not counted</Link></>
+        )}
+      </p>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Card label="Net sales" value={formatPaise(r.netSales)} sub={`${r.invoiceCount} invoice(s)`} />

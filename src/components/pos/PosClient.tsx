@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { barcodeLookupAction, checkoutAction, searchProductsAction } from "@/app/actions";
+import { amendInvoiceAction, barcodeLookupAction, checkoutAction, searchProductsAction } from "@/app/actions";
 import { CustomerPicker, type PickedCustomer } from "@/components/pos/CustomerPicker";
 import { BarcodeScannerModal } from "@/components/scanner/BarcodeScannerModal";
 import { useBarcodeWedge } from "@/hooks/useBarcodeWedge";
@@ -15,6 +15,18 @@ import { formatQty, MILLI, toMilli } from "@/lib/qty";
 import type { ProductStock } from "@/services/inventory";
 
 type PayMode = "cash" | "upi" | "card" | "split" | "credit";
+
+/** Pre-filled editor state when an admin amends a saved bill (see /invoices/[id]/amend). */
+export interface AmendSeed {
+  invoiceId: number;
+  invoiceNumber: string;
+  originalTotal: number;
+  lines: { productId: number; quantity: number; discountType: DiscountType; discountValue: number; auto: boolean }[];
+  paymentMode: PayMode;
+  split: { cash: string; upi: string; card: string; credit: string };
+  customer: PickedCustomer | null;
+  walkIn: { name: string; phone: string };
+}
 
 interface CartLine {
   product: ProductStock;
@@ -50,18 +62,26 @@ function QtyInput({ value, step, decimal, onChange }: { value: number; step: num
   );
 }
 
-export function PosClient() {
+export function PosClient({ amend, products }: { amend?: AmendSeed; products?: ProductStock[] } = {}) {
   const router = useRouter();
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductStock[]>([]);
   const [hi, setHi] = useState(0);
-  const [cart, setCart] = useState<CartLine[]>([]);
+  const [cart, setCart] = useState<CartLine[]>(() =>
+    amend && products
+      ? amend.lines.flatMap((l) => {
+          const product = products.find((p) => p.id === l.productId);
+          return product ? [{ product, qty: l.quantity, discountType: l.discountType, discountValue: l.discountValue, auto: l.auto }] : [];
+        })
+      : [],
+  );
+  const [reason, setReason] = useState("");
   const [scanning, setScanning] = useState(false);
-  const [payMode, setPayMode] = useState<PayMode>("cash");
-  const [split, setSplit] = useState({ cash: "", upi: "", card: "", credit: "" });
-  const [picked, setPicked] = useState<PickedCustomer | null>(null);
-  const [customer, setCustomer] = useState({ name: "", phone: "" });
+  const [payMode, setPayMode] = useState<PayMode>(amend?.paymentMode ?? "cash");
+  const [split, setSplit] = useState(amend?.split ?? { cash: "", upi: "", card: "", credit: "" });
+  const [picked, setPicked] = useState<PickedCustomer | null>(amend?.customer ?? null);
+  const [customer, setCustomer] = useState(amend?.walkIn ?? { name: "", phone: "" });
   const [missing, setMissing] = useState<string | null>(null); // scanned barcode we have no product for
   const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [paying, startPay] = useTransition();
@@ -169,12 +189,12 @@ export function PosClient() {
   // How much of this bill goes on the customer's account (a customer is then required).
   const creditPaise = payMode === "credit" ? totals.grandTotal : payMode === "split" ? splitPaise("credit") || 0 : 0;
   const needsCustomer = creditPaise > 0;
-  const canPay = cart.length > 0 && !hasError && splitOk && (!needsCustomer || !!picked) && !paying;
+  const canPay = cart.length > 0 && !hasError && splitOk && (!needsCustomer || !!picked) && (!amend || reason.trim().length > 0) && !paying;
 
   const pay = useCallback(() => {
     if (!canPay) return;
     startPay(async () => {
-      const res = await checkoutAction({
+      const input = {
         items: cart.map((l) => ({
           productId: l.product.id,
           quantity: l.qty,
@@ -183,19 +203,21 @@ export function PosClient() {
           applyMarkdown: l.auto,
         })),
         paymentMode: payMode,
-        customerId: needsCustomer && picked ? picked.id : null,
+        // When amending, a customer already on the bill stays attached even if it was paid at the counter.
+        customerId: (needsCustomer || amend) && picked ? picked.id : null,
         customerName: needsCustomer ? null : customer.name || null,
         customerPhone: needsCustomer ? null : customer.phone || null,
         split:
           payMode === "split"
             ? { cash: splitPaise("cash"), upi: splitPaise("upi"), card: splitPaise("card"), credit: splitPaise("credit") }
             : null,
-      });
-      if (res.ok) router.push(`/invoices/${res.invoiceId}?print=1`);
+      };
+      const res = amend ? await amendInvoiceAction({ invoiceId: amend.invoiceId, reason, input }) : await checkoutAction(input);
+      if (res.ok) router.push(amend ? `/invoices/${res.invoiceId}` : `/invoices/${res.invoiceId}?print=1`);
       else flash("err", res.error);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canPay, cart, payMode, customer, split, picked, needsCustomer, router, flash]);
+  }, [canPay, cart, payMode, customer, split, picked, needsCustomer, amend, reason, router, flash]);
 
   /* ---- keyboard shortcuts: F2 search, F9 pay ---- */
   useEffect(() => {
@@ -233,6 +255,13 @@ export function PosClient() {
 
   return (
     <div className="mx-auto grid max-w-6xl gap-4 md:grid-cols-[1fr_22rem]">
+      {amend && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 md:col-span-2">
+          <strong>Amending {amend.invoiceNumber}</strong> (originally {formatPaise(amend.originalTotal)}). Change anything below. When you save, the original
+          bill is voided and a corrected bill replaces it. Stock and customer dues are adjusted automatically.{" "}
+          <Link href={`/invoices/${amend.invoiceId}`} className="font-medium underline">Cancel</Link>
+        </div>
+      )}
       {/* Left: search + cart */}
       <div className="space-y-3">
         <div className="relative">
@@ -391,9 +420,16 @@ export function PosClient() {
           )}
         </div>
 
+        {amend && (
+          <div className="card space-y-1">
+            <label className="label" htmlFor="amend-reason">Reason for the change (required)</label>
+            <input id="amend-reason" value={reason} onChange={(e) => setReason(e.target.value)} maxLength={200} placeholder="e.g. wrong quantity keyed" className="w-full" />
+          </div>
+        )}
+
         <div className="fixed inset-x-0 bottom-14 z-20 border-t border-slate-200 bg-white p-2 md:static md:border-0 md:bg-transparent md:p-0">
           <button type="button" disabled={!canPay} onClick={pay} className="btn-primary min-h-14 w-full text-lg">
-            {paying ? "Saving…" : payMode === "credit" ? `Put ${formatPaise(totals.grandTotal)} on credit` : `Pay ${formatPaise(totals.grandTotal)}`} <span className="hidden text-xs opacity-80 md:inline">(F9)</span>
+            {paying ? "Saving…" : amend ? `Save corrected bill ${formatPaise(totals.grandTotal)}` : payMode === "credit" ? `Put ${formatPaise(totals.grandTotal)} on credit` : `Pay ${formatPaise(totals.grandTotal)}`} <span className="hidden text-xs opacity-80 md:inline">(F9)</span>
           </button>
         </div>
       </aside>

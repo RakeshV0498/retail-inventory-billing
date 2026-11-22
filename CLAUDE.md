@@ -51,6 +51,17 @@ Optional until the first admin exists (open mode = everything allowed, actor rec
 - The old single shared PIN is converted to user `admin` (same PIN) inside `runMigrations`. Demo mode: accounts disabled.
 - Never log or return `pinHash` / `sessionSecret`.
 
+## Sales control (void / amend / edit): `src/services/sales.ts`
+- **Bills and payments are never deleted.** Void = status `void` + reason + who/when; the invoice number is never reused (numbers are counted from the day's invoices, so deleting one would collide with the next).
+- `voidInvoice`: puts every line back into its **original batch** and writes a `return` movement per line (invariant `qty == Σ movements` holds), all in one transaction with an audit row. Credit reverses automatically because balances count only **paid** invoices and **active** payments (`balanceOf`, `balancesByCustomer`, ledger, dues report all filter on status).
+- `amendInvoice` = void original + `createInvoiceTx` **in the same transaction** (any failure changes nothing). New number `<original>-A<n>`, keeps the original date and biller, `replaces_invoice_id` links them. Stock is checked against **today** (a batch that expired since can't be re-sold: void instead).
+- `updateInvoiceDetails`: customer / walk-in / notes / payment split only. It reuses `resolvePayment` + `resolveCustomer` from `billing.ts` so the rules (split adds up, credit needs a customer) can't drift from checkout.
+- `voidPayment` (customers.ts) reverses a wrong dues payment. Permissions: `sale.void|amend|edit`, `payment.void` (admin only). Every operation calls `writeAudit` inside its transaction.
+- Reports show `voided` count/total for transparency but never count voided bills in any figure.
+
+## Testing forged server actions (lesson learned)
+Next encodes form fields as `_1_<name>` (leading underscore) and a listener that keeps overwriting the "captured" request will leave you replaying the wrong one. A replay test is only meaningful if **(a)** the forged request has a visible effect and **(b)** the same forged request SUCCEEDS for an admin (positive control). A test that can't fail proves nothing.
+
 ## Database changes (migrations)
 - **Never run `drizzle-kit push` against a real database.** It treats `default 0` as "no default" and demands an interactive data-loss confirmation (it failed on a populated DB).
   Schema changes = edit `schema.ts`, `npm run db:generate`, review and commit the SQL, then `npm run db:push` (which runs `src/db/migrate.ts`).

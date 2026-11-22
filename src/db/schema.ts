@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, sqliteTable, text, uniqueIndex, type AnySQLiteColumn } from "drizzle-orm/sqlite-core";
 
 /**
  * Conventions: money = integer paise, quantity = integer milli-units (1 kg = 1000),
@@ -134,6 +134,11 @@ export const payments = sqliteTable(
     note: text("note"),
     createdBy: integer("created_by").references(() => users.id),
     createdByName: text("created_by_name"),
+    /** A mistaken payment is voided (kept for the record, ignored in balances), never deleted. */
+    status: text("status", { enum: ["active", "void"] }).notNull().default("active"),
+    voidReason: text("void_reason"),
+    voidedAt: text("voided_at"),
+    voidedByName: text("voided_by_name"),
     createdAt: createdAt(),
   },
   (t) => [index("payments_customer_idx").on(t.customerId), index("payments_created_idx").on(t.createdAt), check("payments_amount_chk", sql`${t.amount} > 0`)],
@@ -161,13 +166,21 @@ export const invoices = sqliteTable(
     /** Who rang up the bill (null = before accounts existed / accounts not set up). */
     createdBy: integer("created_by").references(() => users.id),
     createdByName: text("created_by_name"),
+    notes: text("notes"),
     status: text("status", { enum: ["paid", "void"] }).notNull().default("paid"),
+    voidReason: text("void_reason"),
+    voidedAt: text("voided_at"),
+    voidedBy: integer("voided_by").references(() => users.id),
+    voidedByName: text("voided_by_name"),
+    /** Set on a corrected bill (`INV-...-A1`): the bill it replaces. The replaced bill is void. */
+    replacesInvoiceId: integer("replaces_invoice_id").references((): AnySQLiteColumn => invoices.id),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex("invoices_number_uq").on(t.invoiceNumber),
     index("invoices_created_idx").on(t.createdAt),
     index("invoices_customer_idx").on(t.customerId),
+    index("invoices_replaces_idx").on(t.replacesInvoiceId),
   ],
 );
 

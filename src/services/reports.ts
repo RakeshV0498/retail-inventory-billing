@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gt, gte, lt, sql } from "drizzle-orm";
 import type { Db } from "@/db/client";
 import { batches, invoiceItems, invoices, payments, products } from "@/db/schema";
 import { isExpired, localDateTime, rangeBounds, todayISO } from "@/lib/dates";
@@ -31,6 +31,8 @@ export interface SalesReport {
   cgst: number;
   sgst: number;
   roundOff: number;
+  /** Bills voided in this period: shown for transparency, never counted in any figure above. */
+  voided: { count: number; total: number };
   /** Sum of invoice grand totals (what customers paid). */
   netSales: number;
   /** How this period's bills were settled; credit = put on customers' accounts (cash + upi + card + credit = net sales). */
@@ -63,12 +65,18 @@ function loadRange(db: Db, from: string, to: string) {
 
 export function getSalesReport(db: Db, from: string, to: string): SalesReport {
   const { inv, items } = loadRange(db, from, to);
+  const { start: vStart, end: vEnd } = rangeBounds(from, to);
+  const voidedRows = db
+    .select({ n: sql<number>`count(*)`, t: sql<number>`coalesce(sum(${invoices.grandTotal}), 0)` })
+    .from(invoices)
+    .where(and(eq(invoices.status, "void"), gte(invoices.createdAt, vStart), lt(invoices.createdAt, vEnd)))
+    .get();
   const sum = <T,>(rows: T[], f: (r: T) => number) => rows.reduce((s, r) => s + f(r), 0);
   const { start: rangeStart, end: rangeEnd } = rangeBounds(from, to);
   const dues = db
     .select()
     .from(payments)
-    .where(and(gte(payments.createdAt, rangeStart), lt(payments.createdAt, rangeEnd)))
+    .where(and(gte(payments.createdAt, rangeStart), lt(payments.createdAt, rangeEnd), eq(payments.status, "active")))
     .all();
   const duesBy = (mode: "cash" | "upi" | "card") => sum(dues.filter((p) => p.mode === mode), (p) => p.amount);
 
@@ -105,6 +113,7 @@ export function getSalesReport(db: Db, from: string, to: string): SalesReport {
     from,
     to,
     invoiceCount: inv.length,
+    voided: { count: voidedRows?.n ?? 0, total: voidedRows?.t ?? 0 },
     subtotal: sum(inv, (i) => i.subtotal),
     discountTotal: sum(inv, (i) => i.discountTotal),
     taxableTotal: sum(gstSlabs, (s) => s.taxable),

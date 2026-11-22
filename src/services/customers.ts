@@ -4,7 +4,7 @@ import type { Db } from "@/db/client";
 import { customers, DUES_PAYMENT_MODES, invoices, payments, type Customer } from "@/db/schema";
 import { formatPaise } from "@/lib/money";
 import { normalizePhone } from "@/lib/phone";
-import type { Actor } from "./audit";
+import { writeAudit, type Actor } from "./audit";
 import { ServiceError, type Q } from "./types";
 
 /**
@@ -78,7 +78,7 @@ export function balanceOf(db: Q, customerId: number): number {
   const paid = db
     .select({ s: sql<number>`coalesce(sum(${payments.amount}), 0)` })
     .from(payments)
-    .where(eq(payments.customerId, customerId))
+    .where(and(eq(payments.customerId, customerId), eq(payments.status, "active")))
     .get();
   return sumOf(credit?.s) - sumOf(paid?.s);
 }
@@ -100,6 +100,7 @@ function balancesByCustomer(db: Q): Map<number, number> {
   const paid = db
     .select({ id: payments.customerId, s: sql<number>`sum(${payments.amount})` })
     .from(payments)
+    .where(eq(payments.status, "active"))
     .groupBy(payments.customerId)
     .all();
   for (const p of paid) map.set(p.id, (map.get(p.id) ?? 0) - sumOf(p.s));
@@ -151,6 +152,11 @@ export interface LedgerEntry {
   amount: number;
   label: string;
   invoiceId: number | null;
+  /** set on payment entries so an admin can void them */
+  paymentId: number | null;
+  /** A voided payment is listed for the record but does not change the balance. */
+  voided: boolean;
+  voidReason: string | null;
   /** balance after this entry */
   balanceAfter: number;
 }
@@ -165,17 +171,24 @@ export function getCustomerLedger(db: Q, customerId: number): LedgerEntry[] {
   const pays = db.select().from(payments).where(eq(payments.customerId, customerId)).all();
 
   const raw = [
-    ...bills.map((b) => ({ kind: "credit" as const, at: b.at, order: 0, id: b.id, amount: b.amount, label: `Bill ${b.no}`, invoiceId: b.id })),
+    ...bills.map((b) => ({
+      kind: "credit" as const, at: b.at, order: 0, id: b.id, amount: b.amount, label: `Bill ${b.no}`,
+      invoiceId: b.id, paymentId: null, voided: false, voidReason: null as string | null,
+    })),
     ...pays.map((p) => ({
       kind: "payment" as const, at: p.createdAt, order: 1, id: p.id, amount: p.amount,
-      label: `Payment (${p.mode})${p.note ? `: ${p.note}` : ""}`, invoiceId: null,
+      label: `Payment (${p.mode})${p.note ? `: ${p.note}` : ""}${p.createdByName ? ` · by ${p.createdByName}` : ""}`,
+      invoiceId: null, paymentId: p.id, voided: p.status === "void", voidReason: p.voidReason,
     })),
   ].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.order - b.order || a.id - b.id));
 
   let running = 0;
   return raw.map((e) => {
-    running += e.kind === "credit" ? e.amount : -e.amount;
-    return { kind: e.kind, at: e.at, amount: e.amount, label: e.label, invoiceId: e.invoiceId, balanceAfter: running };
+    if (!e.voided) running += e.kind === "credit" ? e.amount : -e.amount;
+    return {
+      kind: e.kind, at: e.at, amount: e.amount, label: e.label, invoiceId: e.invoiceId,
+      paymentId: e.paymentId, voided: e.voided, voidReason: e.voidReason, balanceAfter: running,
+    };
   });
 }
 
@@ -216,5 +229,26 @@ export function recordPayment(
       })
       .returning()
       .get();
+  });
+}
+
+/**
+ * Admin: reverse a payment that was recorded by mistake. The payment is kept (marked void with who/why) and ignored in
+ * balances, so the customer's dues go back up by that amount. Never deletes anything.
+ */
+export function voidPayment(db: Db, paymentId: number, actor: Actor | null, reason: string, now: Date = new Date()): void {
+  const why = reason.trim();
+  if (!why) throw new ServiceError("REASON_REQUIRED", "Please give a reason");
+  if (why.length > 200) throw new ServiceError("INVALID", "Reason is too long (200 characters max)");
+  db.transaction((tx) => {
+    const p = tx.select().from(payments).where(eq(payments.id, paymentId)).get();
+    if (!p) throw new ServiceError("NOT_FOUND", "Payment not found");
+    if (p.status === "void") throw new ServiceError("ALREADY_VOID", "This payment is already voided");
+    tx.update(payments)
+      .set({ status: "void", voidReason: why, voidedAt: now.toISOString(), voidedByName: actor?.name ?? null })
+      .where(eq(payments.id, paymentId))
+      .run();
+    const c = getCustomer(tx, p.customerId);
+    writeAudit(tx, actor, "payment.void", "payment", paymentId, `Voided ${formatPaise(p.amount)} ${p.mode} payment from ${c?.name ?? "customer"}: ${why}`, now);
   });
 }

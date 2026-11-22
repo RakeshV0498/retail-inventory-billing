@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { recordPaymentAction, updateCustomerAction } from "@/app/actions";
+import { recordPaymentAction, updateCustomerAction, voidPaymentAction } from "@/app/actions";
 import { getDb } from "@/db/client";
 import { ConfirmSubmit } from "@/components/ConfirmSubmit";
 import { Field, Notice } from "@/components/ui";
@@ -77,10 +77,21 @@ export default async function CustomerPage({
           <thead className="bg-slate-50"><tr><th className="th">When</th><th className="th">Details</th><th className="th text-right">Amount</th><th className="th text-right">Balance</th></tr></thead>
           <tbody className="divide-y divide-slate-100">
             {ledger.map((e, i) => (
-              <tr key={i}>
+              <tr key={i} className={e.voided ? "bg-slate-50 text-slate-500" : ""}>
                 <td className="td whitespace-nowrap text-xs text-slate-600">{localDateTime(e.at)}</td>
-                <td className="td">{e.invoiceId ? <Link href={`/invoices/${e.invoiceId}`} className="hover:underline">{e.label}</Link> : e.label}</td>
-                <td className={`td text-right font-medium ${e.kind === "credit" ? "text-red-700" : "text-emerald-700"}`}>{e.kind === "credit" ? "+" : "−"} {formatPaise(e.amount)}</td>
+                <td className="td">
+                  {e.invoiceId ? <Link href={`/invoices/${e.invoiceId}`} className="hover:underline">{e.label}</Link> : <span className={e.voided ? "line-through" : ""}>{e.label}</span>}
+                  {e.voided && <div className="text-xs font-medium text-red-700">VOID{e.voidReason ? `: ${e.voidReason}` : ""}</div>}
+                  {e.paymentId !== null && !e.voided && viewer.can("payment.void") && (
+                    <form action={voidPaymentAction} className="mt-1 flex flex-wrap items-center gap-1">
+                      <input type="hidden" name="paymentId" value={e.paymentId} />
+                      <input type="hidden" name="customerId" value={customer.id} />
+                      <input name="reason" required maxLength={200} placeholder="Reason to void" aria-label="Reason to void this payment" className="min-h-9 w-36 text-xs" />
+                      <ConfirmSubmit className="btn-secondary min-h-9 px-2 text-xs" message={`Void this ${formatPaise(e.amount)} payment from ${customer.name}? Their dues go back up by that amount. The payment stays in the history marked VOID.`}>Void</ConfirmSubmit>
+                    </form>
+                  )}
+                </td>
+                <td className={`td text-right font-medium ${e.voided ? "text-slate-400 line-through" : e.kind === "credit" ? "text-red-700" : "text-emerald-700"}`}>{e.kind === "credit" ? "+" : "−"} {formatPaise(e.amount)}</td>
                 <td className="td text-right">{formatPaise(e.balanceAfter)}</td>
               </tr>
             ))}

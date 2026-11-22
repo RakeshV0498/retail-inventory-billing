@@ -1,11 +1,16 @@
 import { notFound } from "next/navigation";
-import { requireAuth } from "@/lib/session";
+import Link from "next/link";
+import { voidInvoiceAction } from "@/app/actions";
+import { ConfirmSubmit } from "@/components/ConfirmSubmit";
+import { Notice } from "@/components/ui";
+import { getViewer, requireAuth } from "@/lib/session";
 import { getDb } from "@/db/client";
 import { PrintControls } from "@/components/PrintControls";
 import { splitGst } from "@/lib/gst";
 import { formatPaise } from "@/lib/money";
 import { formatQty } from "@/lib/qty";
 import { getInvoice } from "@/services/billing";
+import { getInvoiceRelations } from "@/services/sales";
 import { getSettings } from "@/services/settings";
 
 export const dynamic = "force-dynamic";
@@ -17,7 +22,7 @@ export default async function InvoicePage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ format?: string; print?: string }>;
+  searchParams: Promise<{ format?: string; print?: string; error?: string }>;
 }) {
   await requireAuth();
   const { id } = await params;
@@ -28,6 +33,9 @@ export default async function InvoicePage({
   const s = getSettings(db);
   const format: Fmt = sp.format === "58" || sp.format === "80" || sp.format === "a4" ? sp.format : s.printFormat;
   const { invoice, items } = data;
+  const viewer = await getViewer();
+  const rel = getInvoiceRelations(db, invoice.id);
+  const isVoid = invoice.status === "void";
   const thermal = format !== "a4";
   const width = format === "58" ? "58mm" : format === "80" ? "80mm" : "210mm";
   const { cgst, sgst } = splitGst(invoice.taxTotal);
@@ -41,13 +49,66 @@ export default async function InvoicePage({
 
   return (
     <div className="mx-auto max-w-3xl">
-      <PrintControls invoiceId={invoice.id} format={format} autoPrint={sp.print === "1"} />
+      <PrintControls invoiceId={invoice.id} format={format} autoPrint={sp.print === "1" && !isVoid} />
+      <Notice error={sp.error} />
+
+      {isVoid && (
+        <div className="mb-4 rounded-xl border border-red-300 bg-red-50 p-3 text-sm text-red-900 print:hidden">
+          <p className="font-semibold">This bill is VOID, so it is not counted in sales, GST or customer dues.</p>
+          <p>
+            {invoice.voidReason ? `Reason: ${invoice.voidReason}. ` : ""}
+            {invoice.voidedByName ? `By ${invoice.voidedByName}` : "Voided"}
+            {invoice.voidedAt ? ` on ${new Date(invoice.voidedAt).toLocaleString("en-IN")}` : ""}.
+          </p>
+          {(invoice.cashAmount > 0 || invoice.upiAmount > 0 || invoice.cardAmount > 0) && (
+            <p className="mt-1 font-medium">
+              If the customer was already paid back, nothing more to do. Otherwise refund:{" "}
+              {[invoice.cashAmount > 0 && `cash ${formatPaise(invoice.cashAmount)}`, invoice.upiAmount > 0 && `UPI ${formatPaise(invoice.upiAmount)}`, invoice.cardAmount > 0 && `card ${formatPaise(invoice.cardAmount)}`]
+                .filter(Boolean)
+                .join(", ")}
+              .
+            </p>
+          )}
+          {rel.replacedBy && (
+            <p className="mt-1">
+              Replaced by corrected bill <Link href={`/invoices/${rel.replacedBy.id}`} className="font-semibold underline">{rel.replacedBy.invoiceNumber}</Link>.
+            </p>
+          )}
+        </div>
+      )}
+      {rel.replaces && !isVoid && (
+        <p className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 print:hidden">
+          Corrected copy of <Link href={`/invoices/${rel.replaces.id}`} className="font-semibold underline">{rel.replaces.invoiceNumber}</Link> (now void).
+        </p>
+      )}
+
+      {!isVoid && (viewer.can("sale.edit") || viewer.can("sale.amend") || viewer.can("sale.void")) && (
+        <section className="card mb-4 space-y-3 print:hidden" aria-labelledby="admin-actions">
+          <h2 id="admin-actions" className="font-semibold">Admin actions</h2>
+          <div className="flex flex-wrap gap-2">
+            {viewer.can("sale.edit") && <Link href={`/invoices/${invoice.id}/edit`} className="btn-secondary">Edit details</Link>}
+            {viewer.can("sale.amend") && <Link href={`/invoices/${invoice.id}/amend`} className="btn-secondary">Amend items</Link>}
+          </div>
+          {viewer.can("sale.void") && (
+            <form action={voidInvoiceAction} className="flex flex-wrap items-end gap-2 border-t border-slate-100 pt-3">
+              <input type="hidden" name="invoiceId" value={invoice.id} />
+              <label className="min-w-0 flex-1 text-sm">Void this bill (reason required)
+                <input name="reason" required maxLength={200} placeholder="e.g. customer returned everything" className="block w-full" />
+              </label>
+              <ConfirmSubmit className="btn-danger" message={`Void ${invoice.invoiceNumber} (${formatPaise(invoice.grandTotal)})? The stock goes back to its batches${invoice.creditAmount > 0 ? `, ${formatPaise(invoice.creditAmount)} is removed from the customer's dues` : ""}, and the bill stays in the list marked VOID. This can't be undone.`}>
+                Void bill
+              </ConfirmSubmit>
+            </form>
+          )}
+          <p className="text-xs text-slate-500">Bills are never deleted: voiding keeps the record. Amend replaces the bill with a corrected copy (INV-…-A1).</p>
+        </section>
+      )}
       {/* @page size follows the chosen paper */}
       <style>{`@media print { @page { size: ${thermal ? `${width} auto` : "A4"}; margin: ${thermal ? "2mm" : "12mm"}; } body { background: #fff; } }`}</style>
 
       <article
         className={`mx-auto bg-white text-black shadow-sm print:shadow-none ${thermal ? "p-2 font-mono text-[11px] leading-tight" : "p-8 text-sm"}`}
-        style={{ width, maxWidth: "100%" }}
+        style={{ width, maxWidth: "100%", position: "relative" }}
       >
         <header className={thermal ? "text-center" : "mb-4 flex items-start justify-between"}>
           <div>
@@ -58,6 +119,8 @@ export default async function InvoicePage({
           <div className={thermal ? "mt-1" : "text-right"}>
             <p className="font-semibold">TAX INVOICE</p>
             <p>{invoice.invoiceNumber}</p>
+            {rel.replaces && <p>Corrected copy of {rel.replaces.invoiceNumber}</p>}
+            {invoice.notes && <p>Note: {invoice.notes}</p>}
             {invoice.createdByName && <p>Billed by: {invoice.createdByName}</p>}
             <p>{new Date(invoice.createdAt).toLocaleString("en-IN")}</p>
           </div>
@@ -118,6 +181,11 @@ export default async function InvoicePage({
           )}
         </div>
         {s.receiptFooter && <p className="mt-3 text-center">{s.receiptFooter}</p>}
+        {isVoid && (
+          <div aria-hidden className="pointer-events-none absolute inset-0 flex items-center justify-center overflow-hidden">
+            <span className="-rotate-25 select-none border-4 border-red-600 px-3 py-1 text-5xl font-black tracking-widest text-red-600/70">VOID</span>
+          </div>
+        )}
       </article>
     </div>
   );

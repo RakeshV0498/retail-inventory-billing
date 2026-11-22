@@ -15,6 +15,10 @@ const LABELS: Record<string, string> = {
   "user.set_role": "Role changed",
   "user.activate": "Account reactivated",
   "user.deactivate": "Account deactivated",
+  "sale.void": "Bill voided",
+  "sale.amend": "Bill amended",
+  "sale.edit": "Bill details edited",
+  "payment.void": "Payment voided",
 };
 
 export default async function ActivityPage({ searchParams }: { searchParams: Promise<{ user?: string; action?: string }> }) {

@@ -24,11 +24,13 @@ import {
   type ProductStock,
 } from "@/services/inventory";
 import { lookupBarcode, type LookupResult } from "@/services/productLookup";
+import { amendInvoice, updateInvoiceDetails, voidInvoice, type InvoiceDetailsInput } from "@/services/sales";
 import {
   createCustomer,
   recordPayment,
   searchCustomers,
   updateCustomer,
+  voidPayment,
   type CustomerWithBalance,
 } from "@/services/customers";
 import { saveSettings } from "@/services/settings";
@@ -85,6 +87,61 @@ export async function lookupBarcodeAction(code: string, excludeProductId?: numbe
   await requireAuth();
   const exclude = Number.isInteger(excludeProductId) ? excludeProductId : undefined;
   return lookupBarcode(getDb(), String(code).slice(0, 40), { excludeProductId: exclude });
+}
+
+/* ---------- Admin control of sales (void / amend / edit) ---------- */
+
+/** Void a bill: stock back to its batches, dues reversed, record kept. Redirects back to the bill. */
+export async function voidInvoiceAction(form: FormData) {
+  await requirePermission("sale.void");
+  const id = Number(str(form, "invoiceId"));
+  let error: string | null = null;
+  try {
+    voidInvoice(getDb(), id, await getActor(), str(form, "reason"));
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/invoices/${id}?error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect(`/invoices/${id}`);
+}
+
+/** Replace a bill with a corrected one (original voided in the same transaction). Called from the amend editor. */
+export async function amendInvoiceAction(payload: { invoiceId: number; reason: string; input: InvoiceInput }): Promise<CheckoutResult> {
+  await requirePermission("sale.amend");
+  try {
+    const { replacement } = amendInvoice(getDb(), Number(payload.invoiceId), payload.input, await getActor(), String(payload.reason ?? ""));
+    revalidatePath("/", "layout");
+    return { ok: true, invoiceId: replacement.invoice.id };
+  } catch (e) {
+    return { ok: false, error: errMsg(e) };
+  }
+}
+
+/** Edit customer / notes / payment split of a bill (no stock or total changes). */
+export async function updateInvoiceDetailsAction(payload: { invoiceId: number; details: InvoiceDetailsInput }): Promise<CheckoutResult> {
+  await requirePermission("sale.edit");
+  try {
+    const { invoice } = updateInvoiceDetails(getDb(), Number(payload.invoiceId), payload.details, await getActor());
+    revalidatePath("/", "layout");
+    return { ok: true, invoiceId: invoice.id };
+  } catch (e) {
+    return { ok: false, error: errMsg(e) };
+  }
+}
+
+export async function voidPaymentAction(form: FormData) {
+  await requirePermission("payment.void");
+  const customerId = Number(str(form, "customerId"));
+  let error: string | null = null;
+  try {
+    voidPayment(getDb(), Number(str(form, "paymentId")), await getActor(), str(form, "reason"));
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/customers/${customerId}?error=${encodeURIComponent(error)}`);
+  revalidatePath("/", "layout");
+  redirect(`/customers/${customerId}?ok=1`);
 }
 
 /* ---------- Customers & credit ---------- */

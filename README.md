@@ -35,6 +35,7 @@ For real use, self-host on a PC / Raspberry Pi (see Quick start).
 - Customer credit (udhaar): sell on credit or part-pay, record payments, see who owes what, WhatsApp reminder links, dues CSV
 - Reports (`/reports`): sales, discounts, GST by slab (CGST/SGST), payments, daily sales, top products; CSV export for your accountant
 - Dashboard: today's sales, profit estimate, low stock, expiring soon
+- Admin control of sales: void a bill (stock goes back, dues reversed, record kept), amend items/quantities (creates a linked corrected bill `INV-…-A1`), edit customer/payment/notes, void a wrong dues payment. All recorded in the activity log
 - Accounts: username + PIN for admins and staff, every bill records who made it, activity log, per-user sales report; staff can bill and receive stock, admins control everything else (30-day sessions, per-user lockout)
 - Shortcuts (desktop): `F2` search · `Enter` add · `F9` pay · `Ctrl+P` print
 

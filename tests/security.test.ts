@@ -42,6 +42,10 @@ describe("auth coverage (a new page/action/route must call requireAuth)", () => 
     restoreProductAction: "product.archive",
     deleteProductAction: "product.delete",
     saveSettingsAction: "settings.edit",
+    voidInvoiceAction: "sale.void",
+    amendInvoiceAction: "sale.amend",
+    updateInvoiceDetailsAction: "sale.edit",
+    voidPaymentAction: "payment.void",
     createUserAction: "users.manage",
     resetUserPinAction: "users.manage",
     setUserRoleAction: "users.manage",
@@ -84,6 +88,8 @@ describe("auth coverage (a new page/action/route must call requireAuth)", () => 
       "app/(app)/inventory/[id]/batches/[batchId]/page.tsx": "batch.edit",
       "app/(app)/inventory/new/page.tsx": "product.create",
       "app/(app)/activity/page.tsx": "audit.view",
+      "app/(app)/invoices/[id]/edit/page.tsx": "sale.edit",
+      "app/(app)/invoices/[id]/amend/page.tsx": "sale.amend",
     };
     const wrong = Object.entries(ADMIN_PAGES)
       .filter(([f, perm]) => !read(path.join(ROOT, f)).includes(`requirePermission("${perm}")`))
