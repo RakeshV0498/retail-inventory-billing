@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { logoutAction } from "@/app/actions";
 
 const LINKS = [
   { href: "/", label: "Dashboard", icon: "▦" },
@@ -36,7 +37,8 @@ export function Nav() {
             </Link>
           ))}
         </nav>
-        <p className="mt-auto px-2 text-xs text-slate-500">F2 search · Enter add · F9 pay · Ctrl+P print</p>
+        <form action={logoutAction} className="mt-auto px-1"><button className="btn-secondary w-full text-sm">Log out</button></form>
+        <p className="mt-2 px-2 text-xs text-slate-500">F2 search · Enter add · F9 pay · Ctrl+P print</p>
       </aside>
 
       {/* Mobile bottom bar */}

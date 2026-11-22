@@ -35,6 +35,14 @@ DB file: `data/app.db` (gitignored; override with `DATABASE_PATH`). Backup = cop
    must never be sold — re-validate inside the billing transaction, not just in the UI.
 6. Invoice items snapshot name, price, GST rate and purchase price; later edits to products must not change old invoices.
 
+## PIN login (optional)
+Off by default; set in Settings (4-12 digits, scrypt-hashed in the `settings` table, no extra deps).
+- **Every page, server action and route handler must call `await requireAuth()` first** (`src/lib/session.ts`).
+  Layouts alone are not enough: they don't re-render on client navigation and actions can be invoked directly.
+- `isAuthed()` must read `cookies()` *before* any early return, otherwise a build made with no PIN prerenders pages as static HTML.
+- 5 wrong PINs lock logins for 60 s (global, in-memory). Changing/removing the PIN rotates the session secret (signs everyone out).
+- Disabled in demo mode. Never log or return `pinHash` / `sessionSecret`.
+
 ## Demo deployment
 `netlify.toml` sets `NETLIFY_DEMO=1`: `getDb()` then auto-migrates and seeds a `/tmp` DB (`src/db/bootstrap.ts`).
 It is ephemeral and for demos only — never real data. Normal runs (env unset) are unaffected.

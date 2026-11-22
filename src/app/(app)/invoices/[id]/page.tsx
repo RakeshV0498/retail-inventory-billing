@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { requireAuth } from "@/lib/session";
 import { getDb } from "@/db/client";
 import { PrintControls } from "@/components/PrintControls";
 import { splitGst } from "@/lib/gst";
@@ -18,6 +19,7 @@ export default async function InvoicePage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ format?: string; print?: string }>;
 }) {
+  await requireAuth();
   const { id } = await params;
   const sp = await searchParams;
   const db = getDb();

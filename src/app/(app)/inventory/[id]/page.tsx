@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireAuth } from "@/lib/session";
 import { notFound } from "next/navigation";
 import { getDb } from "@/db/client";
 import { isExpired, todayISO } from "@/lib/dates";
@@ -6,7 +7,7 @@ import { formatPaise } from "@/lib/money";
 import { formatQty } from "@/lib/qty";
 import { ExpiryBadge, Field, Notice } from "@/components/ui";
 import { getProduct, getProductBatches } from "@/services/inventory";
-import { addBatchAction, writeOffAction } from "../../actions";
+import { addBatchAction, writeOffAction } from "@/app/actions";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export default async function ProductPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ error?: string; ok?: string }>;
 }) {
+  await requireAuth();
   const { id } = await params;
   const sp = await searchParams;
   const db = getDb();

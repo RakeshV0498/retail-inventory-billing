@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireAuth } from "@/lib/session";
 import { getDb } from "@/db/client";
 import { todayISO } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
@@ -22,7 +23,8 @@ function Stat({ label, value, sub, href, tone }: { label: string; value: string 
   return href ? <Link href={href}>{body}</Link> : body;
 }
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  await requireAuth();
   const db = getDb();
   const now = new Date();
   const today = todayISO(now);
@@ -36,7 +38,10 @@ export default function DashboardPage() {
     <div className="mx-auto max-w-5xl space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold md:text-2xl">{settings.storeName}</h1>
-        <Link href="/pos" className="btn-primary">New bill</Link>
+        <div className="flex gap-2">
+          <Link href="/settings" className="btn-secondary">Settings</Link>
+          <Link href="/pos" className="btn-primary">New bill</Link>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">

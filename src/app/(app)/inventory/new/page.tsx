@@ -1,9 +1,11 @@
 import { CATEGORIES, UNIT_TYPES } from "@/db/schema";
+import { requireAuth } from "@/lib/session";
 import { GST_SLABS } from "@/lib/gst";
 import { Field, Notice } from "@/components/ui";
-import { createProductAction } from "../../actions";
+import { createProductAction } from "@/app/actions";
 
 export default async function NewProductPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
+  await requireAuth();
   const { error } = await searchParams;
   return (
     <div className="mx-auto max-w-2xl">

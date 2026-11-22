@@ -17,6 +17,8 @@ import {
   type ProductStock,
 } from "@/services/inventory";
 import { saveSettings } from "@/services/settings";
+import { checkPin, isPinEnabled, removePin, setPin } from "@/services/auth";
+import { endSession, requireAuth, startSession } from "@/lib/session";
 
 function errMsg(e: unknown): string {
   if (e instanceof ZodError) return e.issues[0]?.message ?? "Invalid input";
@@ -30,16 +32,19 @@ const optStr = (f: FormData, k: string) => str(f, k) || null;
 /* ---------- POS ---------- */
 
 export async function searchProductsAction(q: string): Promise<ProductStock[]> {
+  await requireAuth();
   return searchProducts(getDb(), q, todayISO());
 }
 
 export async function barcodeLookupAction(code: string): Promise<ProductStock | null> {
+  await requireAuth();
   return findByBarcode(getDb(), code, todayISO());
 }
 
 export type CheckoutResult = { ok: true; invoiceId: number } | { ok: false; error: string };
 
 export async function checkoutAction(input: InvoiceInput): Promise<CheckoutResult> {
+  await requireAuth();
   try {
     const { invoice } = createInvoice(getDb(), input);
     revalidatePath("/", "layout");
@@ -52,6 +57,7 @@ export async function checkoutAction(input: InvoiceInput): Promise<CheckoutResul
 /* ---------- Inventory ---------- */
 
 export async function createProductAction(form: FormData) {
+  await requireAuth();
   let id: number;
   try {
     const allowDecimal = form.get("allowDecimalQty") === "on";
@@ -75,6 +81,7 @@ export async function createProductAction(form: FormData) {
 }
 
 export async function addBatchAction(form: FormData) {
+  await requireAuth();
   const productId = Number(str(form, "productId"));
   try {
     addBatch(getDb(), {
@@ -95,6 +102,7 @@ export async function addBatchAction(form: FormData) {
 }
 
 export async function writeOffAction(form: FormData) {
+  await requireAuth();
   const productId = Number(str(form, "productId"));
   try {
     writeOffBatch(getDb(), Number(str(form, "batchId")));
@@ -108,6 +116,7 @@ export async function writeOffAction(form: FormData) {
 /* ---------- Settings ---------- */
 
 export async function saveSettingsAction(form: FormData) {
+  await requireAuth();
   const fmt = str(form, "printFormat");
   saveSettings(getDb(), {
     storeName: str(form, "storeName") || "My Store",
@@ -119,5 +128,55 @@ export async function saveSettingsAction(form: FormData) {
     printFormat: fmt === "58" || fmt === "a4" ? fmt : "80",
   });
   revalidatePath("/", "layout");
+  redirect("/settings?ok=1");
+}
+
+/* ---------- PIN / session ---------- */
+
+export async function loginAction(form: FormData) {
+  const db = getDb();
+  if (!isPinEnabled(db)) redirect("/");
+  const res = checkPin(db, str(form, "pin"));
+  if (!res.ok) {
+    const msg = res.locked ? `Too many attempts. Try again in ${res.retryAfterSec}s.` : "Wrong PIN";
+    redirect(`/login?error=${encodeURIComponent(msg)}`);
+  }
+  await startSession();
+  redirect("/");
+}
+
+export async function logoutAction() {
+  await endSession();
+  redirect("/login");
+}
+
+export async function setPinAction(form: FormData) {
+  await requireAuth();
+  const pin = str(form, "newPin");
+  let error: string | null = null;
+  if (pin !== str(form, "confirmPin")) error = "PINs do not match";
+  else {
+    try {
+      setPin(getDb(), pin, str(form, "currentPin"));
+    } catch (e) {
+      error = errMsg(e);
+    }
+  }
+  if (error) redirect(`/settings?pinerror=${encodeURIComponent(error)}`);
+  // Rotating the secret signed everyone out, including this browser; sign it back in.
+  await startSession();
+  redirect("/settings?ok=1");
+}
+
+export async function removePinAction(form: FormData) {
+  await requireAuth();
+  let error: string | null = null;
+  try {
+    removePin(getDb(), str(form, "currentPin"));
+  } catch (e) {
+    error = errMsg(e);
+  }
+  if (error) redirect(`/settings?pinerror=${encodeURIComponent(error)}`);
+  await endSession();
   redirect("/settings?ok=1");
 }

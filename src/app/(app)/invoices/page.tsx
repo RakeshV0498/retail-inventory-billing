@@ -1,11 +1,13 @@
 import Link from "next/link";
+import { requireAuth } from "@/lib/session";
 import { getDb } from "@/db/client";
 import { formatPaise } from "@/lib/money";
 import { listInvoices } from "@/services/billing";
 
 export const dynamic = "force-dynamic";
 
-export default function InvoicesPage() {
+export default async function InvoicesPage() {
+  await requireAuth();
   const rows = listInvoices(getDb(), 200);
   return (
     <div className="mx-auto max-w-4xl space-y-4">

@@ -31,6 +31,7 @@ For real use, self-host on a PC / Raspberry Pi (see Quick start).
   optional per-batch near-expiry auto-markdown, cash/UPI/card/split
 - Printable invoices: 58mm, 80mm thermal and A4 (`Ctrl+P`)
 - Dashboard: today's sales, profit estimate, low stock, expiring soon
+- Optional PIN login (Settings → PIN protection), 30-day sessions, lockout after 5 wrong tries
 - Shortcuts (desktop): `F2` search · `Enter` add · `F9` pay · `Ctrl+P` print
 
 ## Develop

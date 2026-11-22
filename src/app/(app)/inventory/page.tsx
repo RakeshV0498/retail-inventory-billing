@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { requireAuth } from "@/lib/session";
 import { getDb } from "@/db/client";
 import { todayISO } from "@/lib/dates";
 import { formatPaise } from "@/lib/money";
@@ -17,6 +18,7 @@ const TABS = [
 ] as const;
 
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ tab?: string; days?: string; q?: string }> }) {
+  await requireAuth();
   const sp = await searchParams;
   const tab = TABS.some(([k]) => k === sp.tab) ? (sp.tab as string) : "all";
   const db = getDb();
